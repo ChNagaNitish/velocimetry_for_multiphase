@@ -4,7 +4,6 @@ results/
 *$py.class
 
 # PyTorch weights and HDF5 output files (so you don't commit large binaries)
-*.pth
 *.h5
 *.avi
 *.cine
