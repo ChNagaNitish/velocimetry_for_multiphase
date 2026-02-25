@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch weights and HDF5 output files (so you don't commit large binaries)
+*.pth
+*.h5
+*.avi
+*.cine
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
