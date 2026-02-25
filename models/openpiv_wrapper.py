@@ -97,6 +97,10 @@ class OpenPIVModel(BaseOpticalFlowModel):
             
         workers = min(batch_size, available_cores)
         
+        # Convert PyTorch tensors to numpy arrays (B,H,W,C) for OpenPIV/OpenCV
+        image1_np = image1_batch.permute(0, 2, 3, 1).cpu().numpy()
+        image2_np = image2_batch.permute(0, 2, 3, 1).cpu().numpy()
+        
         with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
             futures = [
                 executor.submit(self._process_single_frame, b, image1_np[b], image2_np[b], h, w)

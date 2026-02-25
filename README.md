@@ -40,15 +40,14 @@ graph TD
 
 The main entry point for inference is `tracker.py`.
 
-### 1. RAFT Optical Flow (Deep Learning, Multi-GPU)
-RAFT is the most accurate method. It requires a trained `.pth` weight file (placed in `./weights/`). It automatically scales across multiple GPUs using `--batch_size`.
+### 1. RAFT Optical Flow (Deep Learning, Single-GPU)
+RAFT is the most accurate method. It requires a trained `.pth` weight file (placed in `./weights/`).
 
 ```bash
 python tracker.py \
   --method raft \
   --model c1.pth \
   --path data/recording_1.cine \
-  --batch_size 4 \
   --use_clahe
 ```
 
@@ -59,7 +58,6 @@ OpenPIV runs on the CPU. It features an HPC-safe parallelization strategy that a
 python tracker.py \
   --method openpiv \
   --path data/recording_1.avi \
-  --batch_size 16 \
   --use_clahe
 ```
 

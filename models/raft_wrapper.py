@@ -36,11 +36,11 @@ class RAFTOpticalFlow(BaseOpticalFlowModel):
         args.alternate_corr = alternate_corr
         
         # Load the PyTorch Module
-        self.model = torch.nn.DataParallel(RAFT(args))
+        self.model = RAFT(args)
         self.model.load_state_dict(torch.load(model_path, map_location=torch.device(self.device)))
         
-        # Send raw stripped module to device if DataParallel isn't wanted, 
-        # but here we keep it to support multi-GPU via DataParallel batch scattering.
+        # Send raw module to device
+        # (DataParallel removed to prevent scaling overhead on small batches/models)
         self.model.to(self.device)
         self.model.eval()
 
