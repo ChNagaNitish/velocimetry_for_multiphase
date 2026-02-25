@@ -13,6 +13,7 @@ from .video import (
 )
 from .visualize import (
     create_quiver_video,
+    create_quiver_image,
     create_spacetime_diagram,
     create_contour_video,
     plot_profile_comparison,

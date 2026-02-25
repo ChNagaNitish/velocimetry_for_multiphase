@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 # Import the newly created postprocess package
 from postprocess import (
     create_quiver_video,
+    create_quiver_image,
     create_contour_video,
     create_spacetime_diagram,
     compute_shedding_frequency,
@@ -37,7 +38,7 @@ def main():
     
     # Quiver features
     parser.add_argument('--quiver', action='store_true', help="Generate a quiver (arrow) velocity overlay video")
-    parser.add_argument('--quiver_scale', type=float, default=2.0, help="Velocity arrow length multiplier. Default: 2.0")
+    parser.add_argument('--quiver_scale', type=float, default=4.0, help="Velocity arrow length multiplier. Default: 4.0")
     parser.add_argument('--quiver_skip', type=int, default=16, help="Pixel spacing between arrows. Default: 16")
     
     # Contour features
@@ -57,6 +58,7 @@ def main():
     # Quantitative Data Extraction
     parser.add_argument('--profiles', type=float, nargs='+', help="List of x-locations (in mm) from throat to extract mean velocity and Reynolds stresses.")
     parser.add_argument('--angle', type=float, default=0.0, help="Angle (degrees) to rotate the velocity field about the throat before extraction.")
+    parser.add_argument('--frame', type=int, default=None, help="Extract profiles at a specific instantaneous frame instead of time-averaged.")
     
     # Quantitative Comparison
     parser.add_argument('--compare', nargs='+', help="List of _lines.h5 files to compare")
@@ -85,7 +87,14 @@ def main():
         print(f"Created output directory: {args.out_dir}")
         
     # Get a base name for the output files
-    base_name = "comparison" if args.compare else os.path.splitext(os.path.basename(args.video))[0]
+    if args.compare:
+        base_name = "comparison"
+    elif args.h5:
+        base_name = os.path.splitext(os.path.basename(args.h5))[0]
+    elif args.video:
+        base_name = os.path.splitext(os.path.basename(args.video))[0]
+    else:
+        base_name = "output"
     
     print("\n--- Starting Post-Processing Visualization ---")
 
@@ -95,9 +104,14 @@ def main():
         plot_profile_comparison(args.compare, args.labels, prop=args.prop, output_path=out_path)
     
     if args.quiver:
-        out_path = os.path.join(args.out_dir, f"{base_name}_quiver.mp4")
-        print(f"\n[1] Generating Quiver Video --> {out_path}")
-        create_quiver_video(args.video, args.h5, out_path, scale=args.quiver_scale, skip=args.quiver_skip)
+        if args.frame is not None:
+            out_path = os.path.join(args.out_dir, f"{base_name}_frame_{args.frame}_quiver.png")
+            print(f"\n[1] Generating Instantaneous Quiver Image (Frame {args.frame}) --> {out_path}")
+            create_quiver_image(args.video, args.h5, out_path, frame_idx=args.frame, scale=args.quiver_scale, skip=args.quiver_skip)
+        else:
+            out_path = os.path.join(args.out_dir, f"{base_name}_quiver.mp4")
+            print(f"\n[1] Generating Quiver Video --> {out_path}")
+            create_quiver_video(args.video, args.h5, out_path, scale=args.quiver_scale, skip=args.quiver_skip)
         
     if args.contour:
         out_path = os.path.join(args.out_dir, f"{base_name}_{args.dataset}_contour.mp4")
@@ -222,8 +236,12 @@ def main():
                 print(f"        Saved: {path}")
         
     if args.profiles:
-        print(f"\n[6] Extracting Velocity Profiles at X = {args.profiles} mm (Rotated {args.angle}°)")
-        results, lines_h5_path = extract_line_profiles(args.h5, args.profiles, angle_deg=args.angle)
+        if args.frame is not None:
+            print(f"\n[6] Extracting Instantaneous Velocity Profiles at X = {args.profiles} mm (Frame {args.frame}, Rotated {args.angle}°)")
+        else:
+            print(f"\n[6] Extracting Time-Averaged Velocity Profiles at X = {args.profiles} mm (Rotated {args.angle}°)")
+            
+        results, lines_h5_path = extract_line_profiles(args.h5, args.profiles, angle_deg=args.angle, frame_idx=args.frame)
         
         print(f"    --> Successfully saved line extractions to: {lines_h5_path}")
         for x_wall, data in results.items():

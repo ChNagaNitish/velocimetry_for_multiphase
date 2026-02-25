@@ -20,6 +20,14 @@ def create_quiver_video(video_path, h5_filepath, output_path, scale=2.0, skip=16
         velData = f['velocity']
         frames = velData.shape[0]
         
+        roi = list(velData.attrs.get('roi', [0, -1, 0, -1]))
+        if roi[1] == -1: roi[1] = height
+        if roi[3] == -1: roi[3] = width
+        y0, y1, x0, x1 = roi[0], roi[1], roi[2], roi[3]
+        
+        win_w = int(velData.attrs.get('window_width', 1))
+        win_h = int(velData.attrs.get('window_height', 1))
+        
         # Read first frame to match indexing (N frames -> N-1 velocity fields)
         ret, _ = cap.read() 
         
@@ -30,25 +38,77 @@ def create_quiver_video(video_path, h5_filepath, output_path, scale=2.0, skip=16
                 
             u = velData[k, :, :, 0]
             v = velData[k, :, :, 1]
-            h, w = u.shape
+            Ny, Nx = u.shape
             
-            # Upscale velocity field to match image dimensions
-            u_resized = cv2.resize(u, (width, height), interpolation=cv2.INTER_LINEAR)
-            v_resized = cv2.resize(v, (width, height), interpolation=cv2.INTER_LINEAR)
-            
-            # Draw arrows
-            for y in range(0, height, skip):
-                for x in range(0, width, skip):
-                    du = int(u_resized[y, x] * scale)
-                    dv = int(v_resized[y, x] * scale)
+            # Map directly from HDF5 matrix indices to physical block centers
+            for j in range(0, Ny, skip):
+                for i in range(0, Nx, skip):
+                    du = int(u[j, i] * scale)
+                    dv = int(v[j, i] * scale)
                     
                     if du != 0 or dv != 0:
-                        cv2.arrowedLine(frame, (x, y), (x + du, y + dv), (0, 0, 255), 1, tipLength=0.3)
+                        # Global frame coordinates relative to ROI starting point and window center
+                        y_glob = y0 + (j * win_h) + (win_h // 2)
+                        x_glob = x0 + (i * win_w) + (win_w // 2)
+                        
+                        cv2.arrowedLine(frame, (x_glob, y_glob), (x_glob + du, y_glob + dv), (0, 0, 255), 1, tipLength=0.3)
                         
             out.write(frame)
             
     cap.release()
     out.release()
+
+def create_quiver_image(video_path, h5_filepath, output_path, frame_idx=0, scale=2.0, skip=16):
+    """
+    Overlays a sparse velocity vector field (quiver plot) onto a single video frame and saves as an image.
+    """
+    cap = cv2.VideoCapture(video_path)
+    
+    # +1 because optical flow for index k corresponds to motion between frame k and k+1.
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx + 1)
+    ret, frame = cap.read()
+    
+    if not ret:
+        print(f"Error reading frame {frame_idx+1} from video.")
+        cap.release()
+        return
+        
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    with h5py.File(h5_filepath, 'r') as f:
+        velData = f['velocity']
+        if frame_idx >= velData.shape[0]:
+            print(f"Error: frame_idx {frame_idx} is out of bounds for velocity data with {velData.shape[0]} frames.")
+            cap.release()
+            return
+            
+        roi = list(velData.attrs.get('roi', [0, -1, 0, -1]))
+        if roi[1] == -1: roi[1] = height
+        if roi[3] == -1: roi[3] = width
+        y0, y1, x0, x1 = roi[0], roi[1], roi[2], roi[3]
+        
+        win_w = int(velData.attrs.get('window_width', 1))
+        win_h = int(velData.attrs.get('window_height', 1))
+            
+        u = velData[frame_idx, :, :, 0]
+        v = velData[frame_idx, :, :, 1]
+        Ny, Nx = u.shape
+        
+    # Map directly from HDF5 matrix indices to physical block centers
+    for j in range(0, Ny, skip):
+        for i in range(0, Nx, skip):
+            du = int(u[j, i] * scale)
+            dv = int(v[j, i] * scale)
+            
+            if du != 0 or dv != 0:
+                y_glob = y0 + (j * win_h) + (win_h // 2)
+                x_glob = x0 + (i * win_w) + (win_w // 2)
+                
+                cv2.arrowedLine(frame, (x_glob, y_glob), (x_glob + du, y_glob + dv), (0, 0, 255), 1, tipLength=0.3)
+                
+    cv2.imwrite(output_path, frame)
+    cap.release()
 
 def create_spacetime_diagram(video_path, roi):
     """
@@ -227,8 +287,8 @@ def plot_profile_comparison(paths, legends, prop='u', output_path=None):
     
     set_journal_style('double')
     
-    # Re-apply the user's specified constrained layout pattern
-    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 4.0), sharey=True, squeeze=False, layout='constrained')
+    # Re-apply the user's specific constrained layout pattern from OldavgPlot
+    fig, axes = plt.subplots(1, n, figsize=(5.0, 3.5), sharey=True, squeeze=False, layout='constrained')
 
     uncert_map = {
         'u':  ('mean_velocity_uncertainty', 0),

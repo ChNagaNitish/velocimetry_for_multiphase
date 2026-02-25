@@ -101,13 +101,19 @@ python visualize_results.py \
 ```
 
 **Quiver Field (Vector Map):**
-Overlays flow vectors onto the time-averaged field.
+Overlays flow vectors onto the images, rigorously anchored to their respective physical spatial integration windows (e.g. 8x8 block centers).
 ```bash
+# Generate a full .mp4 Quiver Video (Requires original video to match spatial dims)
 python visualize_results.py \
   --video data/recording_1.cine \
   --h5 data/recording_1_raft.h5 \
-  --quiver --quiver_skip 16 --quiver_scale 3.0 \
-  --average
+  --quiver --quiver_skip 16 --quiver_scale 4.0
+
+# Generate a single instantaneous high-res PNG Quiver Image (e.g. at Frame 100)
+python visualize_results.py \
+  --video data/recording_1.cine \
+  --h5 data/recording_1_raft.h5 \
+  --quiver --frame 100
 ```
 
 ### 2. Multiphase Measurements
@@ -141,7 +147,9 @@ python visualize_results.py \
 
 ### 3. Spatial Line Extractions (Data Export)
 
-To compare specific geometrical points, you can extract 1D lines of data (U, V, UU, UV, VV, UUID_UNCERT) mapped downstream of the `throat_loc`.
+To compare specific geometrical points, you can extract 1D lines of data mapped downstream of the `throat_loc`. By default, this will compute **time-averaged** profiles (U, V) and Reynolds Stresses (UU, VV, UV) over all frames.
+
+If you specify a single `--frame N`, it will instead extract the **instantaneous velocity** profile for that specific snapshot without temporal averaging constraints.
 
 ```bash
 # Extract profiles at 0mm, 1.5mm, 3mm, 5mm, 10mm, and 15mm downstream of throat X
@@ -150,9 +158,10 @@ python visualize_results.py \
   --h5 data/recording_1_raft.h5 \
   --profiles 0 1.5 3 5 10 15 \
   --angle 0 \
-  --throat_loc 331 85
+  --throat_loc 331 85 \
+  --frame 100
 ```
-This generates a lighter-weight `recording_1_raft_lines.h5` containing strictly these array profiles.
+This generates a lighter-weight `_lines.h5` containing strictly these array profiles.
 
 ### 4. Cross-Method Comparisons
 
@@ -167,80 +176,136 @@ python visualize_results.py \
 ```
 *(Valid `--prop` options: `u`, `v`, `uu`, `uv`, `vv`, `uncert`)*
 
-## 🎓 Running on HPC Clusters (SLURM)
+## 🎓 Running on VT ARC HPC Cluster (Falcon)
 
-Since large multiphase videos (like `.cine` files) can take up hundreds of gigabytes, processing them on HPC clusters using the **SLURM workload manager** is highly recommended. 
+Since large multiphase videos (like `.cine` files) can take up hundreds of gigabytes, processing them on HPC clusters using the **SLURM workload manager** is highly recommended. The Virginia Tech ARC Falcon cluster features GPUs suitable for the RAFT machine learning algorithm.
 
-The pipeline is designed to be SLURM-aware:
-- **RAFT** scales automatically across all GPUs you request.
-- **OpenPIV** automatically reads SLURM's `--cpus-per-task` to prevent node oversubscription and getting killed by the system admin.
+### 1. Account and Allocation
+1. The first step is to have an ARC account and get access to an Allocation through your Professor.
+2. To see details of your ARC account, go to [coldfront.arc.vt.edu](https://coldfront.arc.vt.edu).
+3. If you don’t see any allocations other than `Personal`, ask your professor to provide one. Most likely it will be `Cavitation`.
 
-### SLURM Submission Script (`submit_velocimetry.sh`)
+### 2. Accessing the Terminal and Loading Modules
+After you get the ARC account running, visit [ood.arc.vt.edu](https://ood.arc.vt.edu) to access the clusters and data. 
+We can access the linux terminal through **ood.arc.vt.edu -> Clusters -> Falcon Shell Access**. The Linux Terminal will open in a new window.
 
-Save the following block as `submit_velocimetry.sh` in your project folder. Adjust the partition, time, and memory based on your university/company's cluster configuration.
+Before algorithm execution, we must configure a Python environment. First, load the explicitly required Python and CUDA modules:
+```bash
+module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0
+```
+
+### 3. Setting Up Your Python Environment
+In the terminal, type the following command to create a virtual environment (you can choose your own name):
+```bash
+python3 -m venv NAME-OF-THE-ENV
+```
+
+Activate the environment for this terminal session:
+```bash
+source ~/NAME-OF-THE-ENV/bin/activate
+```
+
+Install the required packages strictly after activation:
+```bash
+pip3 install numpy scipy tqdm pyarrow pandas fastparquet opencv-python torch matplotlib h5py pims openpiv
+```
+
+### 4. Cloning the Repository
+After all the prerequisites are met, we can run the code. If not done before, create an account on GitHub and fork the repository (or directly clone it):
+```bash
+git clone https://github.com/ChNagaNitish/optical-flow-cloud-cavitation.git
+cd optical-flow-cloud-cavitation
+```
+
+### 5. SLURM Submission Script (`jobScript.sh`)
+You cannot directly run the heavy PyTorch/Optical Flow scripts on ARC login nodes. You must use SLURM to create a job and submit it to the queue, specifying required resources (like GPUs).
+
+Save the following block as `jobScript.sh`. You might have to run `chmod +x jobScript.sh` to make it executable.
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=raft_multiphase
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8               # 8 CPU cores for data loading + OpenPIV fallback
-#SBATCH --gres=gpu:a100:2               # Request 2 A100 GPUs (RAFT will use both automatically)
-#SBATCH --mem=64G                       # Allocate 64GB of RAM (Required for large .cine files)
-#SBATCH --time=12:00:00                 # Maximum 12 hour runtime
-#SBATCH --output=logs/velocimetry_%j.out # Standard output log
-#SBATCH --error=logs/velocimetry_%j.err  # Error log
+# 
+#SBATCH -t 0-02:00:00 
+#SBATCH -N 1 
+#SBATCH --account=cavitation 
+#SBATCH --partition=a30_normal_q 
+#SBATCH --gres=gpu:1 
+#SBATCH --mail-user=your-email@vt.edu 
+#SBATCH --mail-type=ALL 
+#SBATCH --job-name=raft48 
+ 
+# Loading required modules 
+module purge 
+module reset 
+module load GCC/13.3.0 Python/3.12.3-GCCcore-13.3.0 
+module load CUDA/12.6.0 
 
-# 1. Load your HPC environments
-module purge
-module load anaconda3/2023.03
-module load cuda/11.8
+# Activate environment
+source "$HOME/NAME-OF-THE-ENV/bin/activate" 
 
-# 2. Activate Python environment
-source activate multiphase_env
-
-# 3. Create logs directory if it doesn't exist
-mkdir -p logs
-
-# 4. Run the Pipeline! (GPU Array Batching)
-# Note: Using batch_size=4 means (Batch 4 / 2 GPUs) -> 2 pairs on GPU 0, 2 pairs on GPU 1
-python tracker.py \
-    --method raft \
-    --model c1.pth \
-    --path /data/experiments/session_1/highspeed_001.cine \
-    --batch_size 4 \
-    --use_clahe \
-    --throat_loc 331 85
+# Run the algorithm
+python3 tracker.py --method raft --model weights/raft-sintel.pth --path /home/your-pid/experiment/48.avi 
 ```
+*Note: This script asks for 1 GPU using the "cavitation" account and "a30_normal_q" partition for 2 hours.*
 
-Submit it to your cluster scheduler using:
+Submit the job to the cluster scheduler using:
 ```bash
-sbatch submit_velocimetry.sh
+sbatch jobScript.sh
 ```
+*You can check your job status by using `squeue -u <Your-PID>` to see whether it is running or still in the queue.*
 
 ---
 
-## 📦 Setting Up Your Environment
-For new students joining the lab, setting up the exact environment is critical to ensure `pims` can read `.cine` files and `torch` can see the GPUs.
+## 🗃️ Data Transfer via SFTP
 
-**1. Create the Conda Environment:**
+Secure File Transfer Protocol (`sftp`) creates a secure connection to transfer files (like your processed `.h5` results or plots) between your local machine (e.g., your laptop or Windows Subsystem for Linux (WSL)) and the ARC HPC clusters. *More details can be found at [docs.arc.vt.edu](https://docs.arc.vt.edu/usage/data_transfer.html).*
+
+### 1. Establishing the Connection 
+Open your **local** terminal and run the following command. You will likely be prompted for your password and 2-factor authentication (Duo). 
 ```bash
-conda create -n multiphase_env python=3.10 -y
-conda activate multiphase_env
+sftp your-PID@datatransfer.arc.vt.edu
+```
+*Note: When you are successful, your command prompt will change to `sftp>`.*
+
+### 2. Navigation
+SFTP allows you to navigate two filesystems simultaneously. Standard commands affect the Remote system (ARC), and commands prefixed with **`l`** (for "local") affect your Local machine.
+
+| Action | Remote Command (ARC) | Local Command (Your PC) |
+|---|---|---|
+| List Files | `ls` | `lls` |
+| Print Working Directory | `pwd` | `lpwd` |
+| Change Directory | `cd directory_name` | `lcd directory_name` |
+| Make Directory | `mkdir new_folder` | `lmkdir new_folder` |
+
+**Examples:**
+Check where you are: 
+```bash
+pwd   # Shows path on ARC (e.g., /home/your-PID/) 
+lpwd  # Shows path on local machine (e.g., /mnt/c/Users/You/Documents)
+```
+If you are using Windows Subsystem for Linux (WSL), you can access your Windows drives via the `/mnt/` mount point:
+```bash
+lcd /mnt/c/Users/YourName/Desktop
 ```
 
-**2. Install PyTorch with CUDA support** 
-*(Check your local system for the correct CUDA version command at pytorch.org)*:
+### 3. Transferring Files
+The core commands are `get` (download from ARC) and `put` (upload to ARC).
+
+**Downloading (ARC $\rightarrow$ Local):**
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+get filename.txt                   # Single File
+get -r RemoteDirectoryName         # Entire Directory (recursive)
 ```
 
-**3. Install Data Processing Libraries:**
+**Uploading (Local $\rightarrow$ ARC):**
 ```bash
-pip install numpy scipy matplotlib tqdm h5py opencv-python pims
+put data_file.csv                  # Single File
+put -r LocalDirectoryName          # Entire Directory (recursive)
 ```
 
-**4. Install OpenPIV:**
-```bash
-pip install openpiv
-```
+### 4. File Management & Exiting 
+You can perform basic file management without leaving the SFTP session:
+- **Rename a remote file:** `rename old_name new_name` 
+- **Delete a remote file:** `rm filename` *(Warning: there is no "trash bin" in CLI)* 
+- **Delete a remote directory:** `rmdir directory_name` 
+- **Exit the session:** Type `exit`, `bye`, or `quit` to return to your standard shell.

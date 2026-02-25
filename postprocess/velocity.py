@@ -174,7 +174,7 @@ def compute_time_average_fields(h5_filepath, frame_start=None, frame_end=None):
 
 from scipy.ndimage import map_coordinates
 
-def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0):
+def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=None):
     """
     Rotates the velocity field around the throat location and extracts mean
     velocities and Reynolds stresses along specified wall-normal x-locations.
@@ -270,9 +270,16 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0):
         sum_v_var_u = np.zeros(shape_r, dtype=np.float64)
         sum_v2_var_u = np.zeros(shape_r, dtype=np.float64)
         
+        if frame_idx is not None:
+            start_f = max(0, frame_idx)
+            end_f   = min(nFrames, frame_idx + 1)
+        else:
+            start_f = 0
+            end_f   = nFrames
+
         chunk_size = 100
-        for t0 in tqdm(range(0, nFrames, chunk_size), desc='Extracting Line Profiles'):
-            t1 = min(t0 + chunk_size, nFrames)
+        for t0 in tqdm(range(start_f, end_f, chunk_size), desc='Extracting Line Profiles'):
+            t1 = min(t0 + chunk_size, end_f)
             chunk = velData[t0:t1]
             
             for b in range(chunk.shape[0]):
@@ -334,26 +341,45 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0):
         with np.errstate(invalid='ignore'):
             umean = sum_u / count
             vmean = sum_v / count
-            uu = sum_uu / count - umean ** 2
-            vv = sum_vv / count - vmean ** 2
-            uv = sum_uv / count - umean * vmean
             
-            # Uncertainty Propagations
-            umean_uncert = np.sqrt(sum_var_u) / count
-            vmean_uncert = np.sqrt(sum_var_v) / count
+            if frame_idx is None:
+                uu = sum_uu / count - umean ** 2
+                vv = sum_vv / count - vmean ** 2
+                uv = sum_uv / count - umean * vmean
+                
+                # Uncertainty Propagations
+                umean_uncert = np.sqrt(sum_var_u) / count
+                vmean_uncert = np.sqrt(sum_var_v) / count
+                
+                var_uu = (4.0 / (count ** 2)) * (sum_u2_var_u - 2 * umean * sum_u_var_u + umean**2 * sum_var_u)
+                var_vv = (4.0 / (count ** 2)) * (sum_v2_var_v - 2 * vmean * sum_v_var_v + vmean**2 * sum_var_v)
+                
+                var_uv_part1 = (sum_v2_var_u - 2 * vmean * sum_v_var_u + vmean**2 * sum_var_u)
+                var_uv_part2 = (sum_u2_var_v - 2 * umean * sum_u_var_v + umean**2 * sum_var_v)
+                var_uv = (1.0 / (count ** 2)) * (var_uv_part1 + var_uv_part2)
+                
+                uu_uncert = np.sqrt(np.maximum(var_uu, 0))
+                vv_uncert = np.sqrt(np.maximum(var_vv, 0))
+                uv_uncert = np.sqrt(np.maximum(var_uv, 0))
+            else:
+                # Instantaneous frame: no temporal variance -> no Reynolds Stresses.
+                uu = np.zeros_like(umean)
+                vv = np.zeros_like(vmean)
+                uv = np.zeros_like(umean)
+                
+                # Instantaneous uncertainty is simply the propagated pixel uncertainty.
+                # (sum_var_u contains the single frame squared uncertainty since count=1)
+                umean_uncert = np.sqrt(sum_var_u)
+                vmean_uncert = np.sqrt(sum_var_v)
+                
+                uu_uncert = np.zeros_like(umean)
+                vv_uncert = np.zeros_like(vmean)
+                uv_uncert = np.zeros_like(umean)
             
-            var_uu = (4.0 / (count ** 2)) * (sum_u2_var_u - 2 * umean * sum_u_var_u + umean**2 * sum_var_u)
-            var_vv = (4.0 / (count ** 2)) * (sum_v2_var_v - 2 * vmean * sum_v_var_v + vmean**2 * sum_var_v)
-            
-            var_uv_part1 = (sum_v2_var_u - 2 * vmean * sum_v_var_u + vmean**2 * sum_var_u)
-            var_uv_part2 = (sum_u2_var_v - 2 * umean * sum_u_var_v + umean**2 * sum_var_v)
-            var_uv = (1.0 / (count ** 2)) * (var_uv_part1 + var_uv_part2)
-            
-            uu_uncert = np.sqrt(np.maximum(var_uu, 0))
-            vv_uncert = np.sqrt(np.maximum(var_vv, 0))
-            uv_uncert = np.sqrt(np.maximum(var_uv, 0))
-            
-        out_path = os.path.splitext(h5_filepath)[0] + '_lines.h5'
+        if frame_idx is not None:
+            out_path = os.path.splitext(h5_filepath)[0] + f'_frame_{frame_idx}_lines.h5'
+        else:
+            out_path = os.path.splitext(h5_filepath)[0] + '_lines.h5'
         
         with h5py.File(out_path, 'w') as fout:
             fout.attrs['rotation_deg'] = angle_deg
