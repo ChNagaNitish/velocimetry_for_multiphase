@@ -307,3 +307,64 @@ You can perform basic file management without leaving the SFTP session:
 - **Delete a remote file:** `rm filename` *(Warning: there is no "trash bin" in CLI)* 
 - **Delete a remote directory:** `rmdir directory_name` 
 - **Exit the session:** Type `exit`, `bye`, or `quit` to return to your standard shell.
+
+---
+
+## 📐 Appendix A: Uncertainty Quantification Methodology
+
+This section details the mathematical basis for the live per-frame uncertainty estimation and its downstream propagation to time-averaged flow statistics (mean velocity and Reynolds stresses).
+
+### 1. Per-Frame Uncertainty Estimation
+
+The uncertainty of individual displacement vectors is computed using a **Window-Smoothed Sub-Pixel Correlation Fit**.
+
+For each interrogation window $N = w_h \times w_w$ pixels, we evaluate the matching uncertainty between the intensity pattern $I_1$ in the first frame and $I_2$ in the second frame. Because small, dense windows (like RAFT flow blocks) lack sufficient image gradients to calculate stable uncertainties independently, we simulate the correlation response of a larger PIV window via spatial smoothing.
+
+1.  **Image-Resolution Warping**: The second image $I_2$ is warped back towards $I_1$ using the integer displacement field $(\mathbf{u}, \mathbf{v})$ obtained from the AI/Optical Flow matching to align structures to sub-pixel precision:
+    $$ I_2^w(\mathbf{x}) = I_2(\mathbf{x} + \mathbf{u}(\mathbf{x})) $$
+
+2.  **Shifted Match Matrices**: We compute 5 continuous dot-product surfaces (Zero-Mean Normalized Cross-Correlation) representing the center match, and shifts of $\pm 1$ pixel in both $x$ and $y$. This forms a local correlation cross $(R_{center}, R_{-x}, R_{+x}, R_{-y}, R_{+y})$.
+
+3.  **Spatial Correlation Smoothing**: The cross-correlation dot products are smoothed using a wide $32 \times 32$ sliding box filter. This is mathematically identical to calculating the correlation map over overlapping $32\times 32$ physical interrogation windows, guaranteeing the surface has a single, stable peak.
+
+4.  **Gaussian Sub-Pixel Peak Fit**: A standard 3-point 1D Gaussian surface fit is applied in $x$ and $y$ to the smoothed correlation cross.
+
+The resulting peak offset $\mu$ represents the *bias error* bounded to a maximum of 1.0 pixel, providing a per-vector, per-frame uncertainty measure $\sigma_u(t)$ and $\sigma_v(t)$.
+
+### 2. Propagation to Time-Averaged Statistics
+
+When computing time-averaged properties from a sequence of $T$ frames, the per-frame measurement uncertainties $\sigma(t)$ mathematically propagate to the final statistics. We assume the measurement error $\epsilon(t)$ is modeled by a zero-mean Gaussian $\epsilon(t) \sim \mathcal{N}(0, \sigma^2(t))$.
+
+#### 2.1 Mean Velocity Uncertainty
+The time-averaged velocity $\bar{u}$ is:
+$$ \bar{u} = \frac{1}{T} \sum_{t=1}^{T} u(t) $$
+
+The variance of the mean, assuming independent measurement errors, is the sum of variances scaled by $1/T^2$:
+$$ \text{Var}(\bar{u}) = \sum_{t=1}^{T} \left( \frac{\partial \bar{u}}{\partial u(t)} \sigma_u(t) \right)^2 = \sum_{t=1}^{T} \left( \frac{1}{T} \sigma_u(t) \right)^2 $$
+$$ \sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \sigma_u^2(t)} $$
+
+*Note: For large $T$, this value appropriately decreases as $1/\sqrt{T}$. Even in highly unsteady flow, random measurement error averages out; physical unsteadiness is preserved in the Reynolds stresses instead.*
+
+#### 2.2 Reynolds Stress Uncertainty
+The Reynolds normal stress $\langle u'u' \rangle$ is defined as the variance of the velocity fluctuations:
+$$ \langle u'u' \rangle = \frac{1}{T} \sum_{t=1}^{T} (u(t) - \bar{u})^2 $$
+
+To estimate the uncertainty $\sigma_{\langle u'u' \rangle}$, we use the standard error propagation formula (linearized approximation / delta method).
+Let $f = \langle u'u' \rangle$. The sensitivity of $f$ to a single measurement $u(t)$ is:
+$$ \frac{\partial f}{\partial u(t)} \approx \frac{2}{T} (u(t) - \bar{u}) $$
+
+The propagated variance is therefore:
+$$ \text{Var}(\langle u'u' \rangle) = \sum_{t=1}^{T} \left( \frac{\partial f}{\partial u(t)} \sigma_u(t) \right)^2 $$
+$$ \sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum_{t=1}^{T} (u(t) - \bar{u})^2 \sigma_u^2(t)} $$
+
+Correlation terms like shear stress $\langle u'v' \rangle$ follow a similar derivation, accounting for errors in both $u$ and $v$:
+$$ \sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \left[ (v(t) - \bar{v})^2 \sigma_u^2(t) + (u(t) - \bar{u})^2 \sigma_v^2(t) \right]} $$
+
+### 3. Summary of Equations
+
+| Quantity | Symbol | Uncertainty Formula |
+| :--- | :--- | :--- |
+| **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \text{Sub-Pixel Correlation Gaussian Fit Precision}$ |
+| **Mean Velocity** | $\bar{u}$ | $\sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum \sigma_u^2(t)}$ |
+| **Reynolds Normal Stress** | $\langle u'u' \rangle$ | $\sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum (u-\bar{u})^2 \sigma_u^2(t)}$ |
+| **Reynolds Shear Stress** | $\langle u'v' \rangle$ | $\sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum [ (v-\bar{v})^2 \sigma_u^2(t) + (u-\bar{u})^2 \sigma_v^2(t) ]}$ |
