@@ -3,13 +3,13 @@
 #SBATCH -t 0-01:00:00 
 #SBATCH -N 1
 #SBACTH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=4
 #SBATCH --account=cavitation
 #SBATCH --partition=a30_normal_q
 #SBATCH --gres=gpu:1
 #SBATCH --mail-user=naga@vt.edu
 #SBATCH --mail-type=ALL
-#SBATCH --job-name=piv
+#SBATCH --job-name=sin48
 
 # Loading required modules
 module purge
@@ -28,12 +28,13 @@ source "$HOME/workEnv/bin/activate"
 
 # 1. RAFT (Deep Learning Optical Flow)
 # Highly accurate, leverages the requested A30 GPU automatically. Requires an optical flow .pth model weight.
-#python3 tracker.py --method raft --model weights/raft-cloudcav.pth --path /scratch/naga/30.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
+python3 tracker.py --method raft --model weights/raft-sintel.pth --path /scratch/naga/48.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
+
 # 2. OpenPIV (Classical Particle Image Velocimetry)
 # Operates strictly on the CPU. Automatically allocates worker pools matching your SLURM --cpus-per-task limit.
 # Note: When running OpenPIV, you must uncomment the SBATCH command below to request CPU cores from ARC.
-python3 tracker.py --method openpiv --path /scratch/naga/30.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
+#python3 tracker.py --method openpiv --path /scratch/naga/48.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
 
 # 3. Farneback (Classical Optical Flow)
 # Fast, baseline optical flow based on OpenCV's internal implementations.
-#python3 tracker.py --method farneback --path /scratch/naga/30.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
+#python3 tracker.py --method farneback --path /scratch/naga/48.cine --use_clahe --throat_loc 331 85 --imgScale 0.04917372 --fpsCam 130000
