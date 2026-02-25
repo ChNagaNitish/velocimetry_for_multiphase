@@ -65,8 +65,8 @@ def main(args):
         raise ValueError(f"Unknown Method: {args.method}")
 
     # DataLoader Batch Size
-    # RAFT/Farneback run sequentially per GPU stream (batch=1), OpenPIV runs multi-process chunks
-    dl_batch_size = 16 if args.method == 'openpiv' else 1
+    # OpenPIV runs multi-process chunks of 16. RAFT uses DataParallel batches.
+    dl_batch_size = 16 if args.method == 'openpiv' else args.batch_size
     
     dataloader = DataLoader(
         dataset, 
@@ -136,6 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('--roi', type=int, nargs=4, default=[0, -1, 0, -1], help="ROI: y_start y_end x_start x_end (-1 to end)")
     
     # Multi-Processing / Multi-GPU settings
+    parser.add_argument('--batch_size', type=int, default=1, help="Number of frames per PyTorch batch")
     parser.add_argument('--num_workers', type=int, default=4, help="CPU threads for video decoding")
     
     # RAFT specific

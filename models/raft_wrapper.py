@@ -35,12 +35,10 @@ class RAFTOpticalFlow(BaseOpticalFlowModel):
         args.mixed_precision = mixed_precision
         args.alternate_corr = alternate_corr
         
-        # Load the PyTorch Module
-        self.model = RAFT(args)
+        # Load the PyTorch Module via DataParallel (Natives the 'module.' prefix)
+        self.model = torch.nn.DataParallel(RAFT(args))
         self.model.load_state_dict(torch.load(model_path, map_location=torch.device(self.device)))
         
-        # Send raw module to device
-        # (DataParallel removed to prevent scaling overhead on small batches/models)
         self.model.to(self.device)
         self.model.eval()
 
