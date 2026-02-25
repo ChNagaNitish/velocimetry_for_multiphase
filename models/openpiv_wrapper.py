@@ -53,6 +53,8 @@ class OpenPIVModel(BaseOpticalFlowModel):
                 img1, img2, i, x, y, u, v, self.settings
             )
             
+        return x, y, u, v
+            
     def _process_single_frame(self, b, image1_np, image2_np, h, w):
         gray1 = cv2.cvtColor(image1_np.astype(np.uint8), cv2.COLOR_RGB2GRAY)
         gray2 = cv2.cvtColor(image2_np.astype(np.uint8), cv2.COLOR_RGB2GRAY)
