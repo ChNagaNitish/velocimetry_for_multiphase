@@ -89,13 +89,27 @@ The `visualize_results.py` script bridges the `.h5` output with physical analysi
 
 ### 1. Basic Inspections (Fields of View)
 
-**Time-Averaged Velocity Contour Field:**
-Generates a `_contour.png` map of the mean magnitude velocity over all frames.
+**Velocity & Uncertainty Contour Fields:**
+Generates translucent heat-map overlays for either velocity magnitude or uncertainty mapping.
+
 ```bash
+# Instantaneous Velocity Contour Video
+python visualize_results.py \
+  --video data/recording_1.cine \
+  --h5 data/recording_1_raft.h5 \
+  --contour
+
+# Instantaneous Uncertainty Contour Video
 python visualize_results.py \
   --video data/recording_1.cine \
   --h5 data/recording_1_raft.h5 \
   --contour \
+  --dataset uncertainty \
+  --alpha 0.6
+
+# Time-Averaged Fields (Velocity & Reynolds Stresses images)
+python visualize_results.py \
+  --h5 data/recording_1_raft.h5 \
   --average
 ```
 
@@ -113,6 +127,16 @@ python visualize_results.py \
   --video data/recording_1.cine \
   --h5 data/recording_1_raft.h5 \
   --quiver --frame 100
+```
+
+**Animated U-Profile Overlay Video:**
+Generates an MP4 video appending 10 equidistant instantaneous U-velocity profiles physically overlaid onto the flow.
+```bash
+python visualize_results.py \
+  --video data/recording_1.cine \
+  --h5 data/recording_1_raft.h5 \
+  --profile_video \
+  --fps 10
 ```
 
 ### 2. Multiphase Measurements
@@ -167,11 +191,12 @@ This generates a lighter-weight `_lines.h5` containing strictly these array prof
 Once line profiles (`_lines.h5`) are extracted from multiple methods/cases, compare them directly. This generates publication-ready stacked plots across the specified coordinates.
 
 ```bash
-# Compare U-velocity profiles between Farneback, OpenPIV, and RAFT
+# Compare U-velocity profiles between Farneback, OpenPIV, and RAFT with uncertainty bounds
 python visualize_results.py \
   --compare 48_fb_lines.h5 48_piv_lines.h5 48_raft_lines.h5 \
   --labels Farneback OpenPIV RAFT-Sintel \
-  --prop u
+  --prop u \
+  --show_uncertainty
 ```
 *(Valid `--prop` options: `u`, `v`, `uu`, `uv`, `vv`, `uncert`)*
 
