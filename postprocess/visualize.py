@@ -195,7 +195,115 @@ def create_contour_video(video_path, h5_filepath, dataset_name, output_path, alp
             out.write(blended)
             
     cap.release()
+    cap.release()
     out.release()
+
+def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, fps=10):
+    """
+    Renders an mp4 video overlaying 10 equidistant instantaneous U-velocity profiles 
+    on top of the velocity magnitude heatmap and raw camera frames.
+    """
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+    
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error opening video {video_path}")
+        return
+        
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    with h5py.File(h5_filepath, 'r') as f:
+        velData = f['velocity']
+        attrs = dict(velData.attrs)
+        
+        mm_per_px = attrs.get('mm_per_px', 1.0)
+        fps_capture = attrs.get('fps_capture', 1.0)
+        win_w = int(attrs.get('window_width', 1))
+        win_h = int(attrs.get('window_height', 1))
+        roi = list(attrs.get('roi', [0, -1, 0, -1]))
+        
+        n_frames = velData.shape[0]
+        Ny, Nx = velData.shape[1:3]
+        
+    scale_fac = mm_per_px * 1e-3 * fps_capture
+    
+    if roi[1] == -1: roi[1] = height
+    if roi[3] == -1: roi[3] = width
+    y0, x0 = roi[0], roi[2]
+    
+    # Pre-calculate spatial grids
+    extent = [0, width, height, 0]
+    
+    # 10 equidistant indices along Nx
+    x_indices = np.linspace(0, Nx - 1, num_profiles, dtype=int)
+    
+    # Construct y pixel locations matching velocity columns
+    y_px = y0 + (np.arange(Ny) * win_h) + (win_h / 2.0)
+    
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = None
+
+    profile_scale_px = 1.0  # Scale tuning for the profile plot size
+    
+    # Advance 1 video frame to align with flow arrays
+    ret, _ = cap.read()
+    
+    print(f"Generating profile intersection animation at {fps} fps...")
+    for k in tqdm(range(n_frames), desc="Rendering Profile Video"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        with h5py.File(h5_filepath, 'r') as f:
+            vel = f['velocity'][k]
+            
+        u = vel[..., 0] * scale_fac
+        v = -vel[..., 1] * scale_fac
+        mag = np.sqrt(u**2 + v**2)
+        
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+        
+        ax.imshow(img_rgb)
+        contour = ax.imshow(mag, cmap='jet', alpha=0.4, extent=extent, vmin=0, vmax=np.nanpercentile(mag, 98))
+        
+        # Add colorbar 
+        cbar = plt.colorbar(contour, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Velocity Magnitude (m/s)')
+        
+        for idx_x in x_indices:
+            x_base_px = x0 + (idx_x * win_w) + (win_w / 2.0)
+            u_prof = u[:, idx_x]
+            
+            # Baseline zero reference
+            ax.axvline(x=x_base_px, color='white', linestyle='--', alpha=0.4)
+            # Extracted profile at instantaneous frame
+            ax.plot(x_base_px + u_prof * profile_scale_px, y_px, color='red', linewidth=1.5)
+            
+        ax.set_title(f"Instantaneous Profile Flow field (Frame {k})")
+        ax.set_xlim(0, width)
+        ax.set_ylim(height, 0)
+        ax.axis('off')
+        
+        fig.tight_layout(pad=0)
+        fig.canvas.draw()
+        
+        # Convert matplotlib canvas to CV2 BGR array
+        img_rgba = np.asarray(fig.canvas.buffer_rgba())
+        img_bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
+        
+        if out is None:
+            out = cv2.VideoWriter(output_path, fourcc, fps, (img_bgr.shape[1], img_bgr.shape[0]))
+            
+        out.write(img_bgr)
+        plt.close(fig)
+        
+    cap.release()
+    if out is not None:
+        out.release()
 
 def set_journal_style(column_type='single'):
     """
@@ -235,19 +343,21 @@ def set_journal_style(column_type='single'):
         "savefig.pad_inches": 0.05
     })
 
-def plot_profile_comparison(paths, legends, prop='u', output_path=None):
+def plot_profile_comparison(paths, legends, prop='u', output_path=None, show_uncertainty=False):
     """
     Plots comparison profiles from multiple _lines.h5 files.
 
     Creates a grid of subplots (one per x-location). Each subplot shows
     the chosen property vs. y-coordinate for every file, labelled with
-    the supplied legends.
+    the supplied legends. By default, time-averaged profile plots will hide
+    uncertainty bounds unless show_uncertainty is True.
 
     Args:
         paths:   List of paths to _lines.h5 files produced by extract_line_profiles.
         legends: Display label for each file (same order as *paths*).
         prop:    Property to compare - 'u', 'v', 'uu', 'uv', or 'vv'.
         output_path: Optional path to save the figure. If None, plt.show().
+        show_uncertainty: Whether to shade uncertainty bounds along the profiles.
     """
     prop_map = {
         'u':  ('mean_velocity', 0),
@@ -320,7 +430,7 @@ def plot_profile_comparison(paths, legends, prop='u', output_path=None):
 
                     line, = ax.plot(data, y, label=label, linewidth=1.5)
 
-                    if unc_ds_name in grp:
+                    if show_uncertainty and (unc_ds_name in grp):
                         sigma = np.array(grp[unc_ds_name][:npts, unc_col_idx])
                         ax.fill_betweenx(y, data - sigma, data + sigma, alpha=0.2, color=line.get_color())
             except Exception as e:

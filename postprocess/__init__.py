@@ -17,5 +17,6 @@ from .visualize import (
     create_spacetime_diagram,
     create_contour_video,
     plot_profile_comparison,
-    plot_average_contours
+    plot_average_contours,
+    create_profile_video
 )

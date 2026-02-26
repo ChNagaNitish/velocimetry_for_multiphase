@@ -323,13 +323,16 @@ For each interrogation window $N = w_h \times w_w$ pixels, we evaluate the match
 1.  **Image-Resolution Warping**: The second image $I_2$ is warped back towards $I_1$ using the integer displacement field $(\mathbf{u}, \mathbf{v})$ obtained from the AI/Optical Flow matching to align structures to sub-pixel precision:
     $$ I_2^w(\mathbf{x}) = I_2(\mathbf{x} + \mathbf{u}(\mathbf{x})) $$
 
-2.  **Shifted Match Matrices**: We compute 5 continuous dot-product surfaces (Zero-Mean Normalized Cross-Correlation) representing the center match, and shifts of $\pm 1$ pixel in both $x$ and $y$. This forms a local correlation cross $(R_{center}, R_{-x}, R_{+x}, R_{-y}, R_{+y})$.
+2.  **Shifted Match Matrices**: We shift Frame 2 locally by $\pm 2$ pixels in X and Y (creating an $8\times8$ physical search sweep). 
 
-3.  **Spatial Correlation Smoothing**: The cross-correlation dot products are smoothed using a wide $32 \times 32$ sliding box filter. This is mathematically identical to calculating the correlation map over overlapping $32\times 32$ physical interrogation windows, guaranteeing the surface has a single, stable peak.
+3.  **Local Template Matching**: For every shift, a local $4\times 4$ Zero-Mean Normalized Cross-Correlation (ZNCC) is mathematically isolated. This structural block-matching yields a true $5\times 5$ correlation peak surface uniquely computed for every single pixel coordinate concurrently.
 
-4.  **Gaussian Sub-Pixel Peak Fit**: A standard 3-point 1D Gaussian surface fit is applied in $x$ and $y$ to the smoothed correlation cross.
+4.  **Gaussian Sub-Pixel Tracking Error ($\Delta^2$)**: A standard 3-point 1D Gaussian mathematical curve fit is independently evaluated in $x$ and $y$ around the maximum of the localized $5\times 5$ sub-pixel correlation surface to locate the true empirical structural origin. 
 
-The resulting peak offset $\mu$ represents the *bias error* bounded to a maximum of 1.0 pixel, providing a per-vector, per-frame uncertainty measure $\sigma_u(t)$ and $\sigma_v(t)$.
+The distance between the predicted flow vector origin `(0, 0)` and the empirical sub-pixel correlation true origin is extracted as the decoupled peak shift offset $\Delta$. 
+The uncertainty explicitly isolates this geometric Particle Tracking Error, completely discarding the ambient texture variance:
+$$ \text{Var}(X) = \Delta^2 $$ 
+This yields a high-fidelity, completely unbounded per-vector, per-frame tracking failure measurement $\sigma_u(t)$ and $\sigma_v(t)$ directly mirroring physical coordinate prediction deviations.
 
 ### 2. Propagation to Time-Averaged Statistics
 
@@ -364,7 +367,7 @@ $$ \sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \left[ (v(t)
 
 | Quantity | Symbol | Uncertainty Formula |
 | :--- | :--- | :--- |
-| **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \text{Sub-Pixel Correlation Gaussian Fit Precision}$ |
+| **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \text{Sub-Pixel Particle Tracking Offset Distance } (\Delta)$ |
 | **Mean Velocity** | $\bar{u}$ | $\sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum \sigma_u^2(t)}$ |
 | **Reynolds Normal Stress** | $\langle u'u' \rangle$ | $\sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum (u-\bar{u})^2 \sigma_u^2(t)}$ |
 | **Reynolds Shear Stress** | $\langle u'v' \rangle$ | $\sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum [ (v-\bar{v})^2 \sigma_u^2(t) + (u-\bar{u})^2 \sigma_v^2(t) ]}$ |

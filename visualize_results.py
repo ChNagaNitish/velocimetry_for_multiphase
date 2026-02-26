@@ -21,7 +21,8 @@ from postprocess import (
     extract_line_profiles,
     plot_profile_comparison,
     compute_time_average_fields,
-    plot_average_contours
+    plot_average_contours,
+    create_profile_video
 )
 
 def main():
@@ -50,6 +51,10 @@ def main():
     # Spacetime plot features
     parser.add_argument('--spacetime', action='store_true', help="Generate an average Space-Time (x-t) tracking plot")
     
+    # Animated Line Profile features
+    parser.add_argument('--profile_video', action='store_true', help="Generate an animated video of 10 equidistant instantaneous U-profiles overlaid on the velocity contour")
+    parser.add_argument('--fps', type=int, default=10, help="Frames per second for generated videos (profile_video, contour, quiver). Default: 10")
+    
     # Analytics features
     parser.add_argument('--average', action='store_true', help="Compute and output full 2D time-averaged velocity and Reynolds Stresses")
     parser.add_argument('--frequency', action='store_true', help="Compute and output the cavity shedding frequency (PSD)")
@@ -64,6 +69,7 @@ def main():
     parser.add_argument('--compare', nargs='+', help="List of _lines.h5 files to compare")
     parser.add_argument('--labels', nargs='+', help="List of legends for the compared files")
     parser.add_argument('--prop', type=str, default='u', choices=['u', 'v', 'uu', 'uv', 'vv'], help="Property to compare (e.g. u, v, uu, uv, vv). Default: u")
+    parser.add_argument('--show_uncertainty', action='store_true', help="Plot uncertainty bounds when comparing profiles.")
     
     parser.add_argument('--plot', action='store_true', help="Generate and save PNG plots for analytical flags like --frequency, --cavity, or --profiles")
 
@@ -101,7 +107,7 @@ def main():
     if args.compare:
         out_path = os.path.join(args.out_dir, f"{base_name}_{args.prop}_profiles.png")
         print(f"\n[C] Comparing {args.prop.upper()} profiles across {len(args.compare)} files --> {out_path}")
-        plot_profile_comparison(args.compare, args.labels, prop=args.prop, output_path=out_path)
+        plot_profile_comparison(args.compare, args.labels, prop=args.prop, output_path=out_path, show_uncertainty=args.show_uncertainty)
     
     if args.quiver:
         if args.frame is not None:
@@ -117,6 +123,11 @@ def main():
         out_path = os.path.join(args.out_dir, f"{base_name}_{args.dataset}_contour.mp4")
         print(f"\n[2] Generating {args.dataset.capitalize()} Contour Video --> {out_path}")
         create_contour_video(args.video, args.h5, dataset_name=args.dataset, output_path=out_path, alpha=args.alpha)
+        
+    if args.profile_video:
+        out_path = os.path.join(args.out_dir, f"{base_name}_profile_anim.mp4")
+        print(f"\n[VP] Generating Profile Overlay Video --> {out_path}")
+        create_profile_video(args.video, args.h5, output_path=out_path, num_profiles=10, fps=args.fps)
         
     if args.spacetime:
         # Load ROI automatically from HDF5 metadata
@@ -247,10 +258,10 @@ def main():
         for x_wall, data in results.items():
             print(f"        X = {x_wall} mm | Extracted {data['valid_counts'][0]} valid spatial points")
         
-    if not (args.quiver or args.contour or args.spacetime or args.frequency or args.cavity or args.profiles or args.compare or args.average):
+    if not (args.quiver or args.contour or args.spacetime or args.frequency or args.cavity or args.profiles or args.compare or args.average or args.profile_video):
         print("\nNo visualization flags were provided!")
-        print("Please run with --quiver, --contour, --spacetime, --frequency, --cavity, --profiles, --average, and/or --compare.")
-        print("Example: python3 visualize_results.py --video myvid.avi --h5 results.h5 --quiver")
+        print("Please run with --quiver, --contour, --profile_video, --spacetime, --frequency, --cavity, --profiles, --average, and/or --compare.")
+        print("Example: python3 visualize_results.py --video myvid.avi --h5 results.h5 --profile_video")
     else:
         print("\n--- Processing Complete ---")
 

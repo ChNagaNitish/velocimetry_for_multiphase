@@ -78,10 +78,10 @@ def shift_img(img, dx, dy):
     start_x = pad_left - dx
     return padded[:, :, start_y:start_y+H, start_x:start_x+W]
 
-def compute_uncertainty_batch(image1, image2, flow, window_size=32):
+def compute_uncertainty_batch(image1, image2, flow, window_size=4):
     """
     Computes dense optical flow uncertainty metrics matching the 
-    Window-Smoothed Correlation format, fully batched in PyTorch.
+    classical PIV 1D Gaussian Correlation Peak Fit format, fully batched.
     
     Args:
         image1: (B, C, H, W) -> will be converted to grayscale if C=3
@@ -98,36 +98,82 @@ def compute_uncertainty_batch(image1, image2, flow, window_size=32):
         
     # Warp image2 backwards using the calculated flow
     img2_w = warp_img(image2, flow)
-    
-    # Base correlation
-    R_0 = get_smoothed_ncc(image1, img2_w, window_size)
-    
-    # +/- 1 pixel shifts to sample the correlation peak surface
-    R_px = get_smoothed_ncc(image1, shift_img(img2_w, -1, 0), window_size)
-    R_mx = get_smoothed_ncc(image1, shift_img(img2_w, 1, 0), window_size)
-    R_py = get_smoothed_ncc(image1, shift_img(img2_w, 0, -1), window_size)
-    R_my = get_smoothed_ncc(image1, shift_img(img2_w, 0, 1), window_size)
-    
-    # Clamp to prevent log(0) or log(negative)
     eps = 1e-8
-    R_0 = torch.clamp(R_0, eps, 1.0)
-    R_px = torch.clamp(R_px, eps, 1.0)
-    R_mx = torch.clamp(R_mx, eps, 1.0)
-    R_py = torch.clamp(R_py, eps, 1.0)
-    R_my = torch.clamp(R_my, eps, 1.0)
     
-    def get_sigma(Rm, R0, Rp):
-        # 3-point Gaussian Fit second derivative approximation
+    # Use a 4x4 localized window over the 32x32 global region
+    win_size = 4
+    
+    def get_ncc_shift(dx, dy):
+        # Calculates 4x4 localized NCC for a given integer shift
+        R = get_smoothed_ncc(image1, shift_img(img2_w, dx, dy), window_size=win_size)
+        return torch.clamp(R.mean(dim=1, keepdim=True), eps, 1.0)
+
+    # We shift Frame 2 by [-2, -1, 0, 1, 2] in X and Y to sweep an 8x8 region 
+    # matching a 4x4 template natively.
+    
+    # Center
+    R_0 = get_ncc_shift(0, 0)
+    
+    # X axis sweep (dx shifts)
+    R_x_m2 = get_ncc_shift(2, 0)
+    R_x_m1 = get_ncc_shift(1, 0)
+    R_x_p1 = get_ncc_shift(-1, 0)
+    R_x_p2 = get_ncc_shift(-2, 0)
+    
+    # Y axis sweep (dy shifts)
+    R_y_m2 = get_ncc_shift(0, 2)
+    R_y_m1 = get_ncc_shift(0, 1)
+    R_y_p1 = get_ncc_shift(0, -1)
+    R_y_p2 = get_ncc_shift(0, -2)
+
+    # Stack to find max along the 5 shifts: (B, 1, H, W, 5)
+    R_X = torch.stack([R_x_m2, R_x_m1, R_0, R_x_p1, R_x_p2], dim=-1)
+    R_Y = torch.stack([R_y_m2, R_y_m1, R_0, R_y_p1, R_y_p2], dim=-1)
+
+    # Autodetect the correlation peak index [0 to 4] for every pixel 
+    max_idx_X = torch.argmax(R_X, dim=-1, keepdim=True)
+    max_idx_Y = torch.argmax(R_Y, dim=-1, keepdim=True)
+    
+    # Ensure the center of our 3-point fit is not on the absolute edges 
+    # so we can always extract a left/right neighbor for the curve fit.
+    center_idx_X = torch.clamp(max_idx_X, 1, 3)
+    center_idx_Y = torch.clamp(max_idx_Y, 1, 3)
+    
+    # Gather Rm (left), R0 (center), Rp (right)
+    Rm_X = torch.gather(R_X, -1, center_idx_X - 1).squeeze(-1)
+    R0_X = torch.gather(R_X, -1, center_idx_X).squeeze(-1)
+    Rp_X = torch.gather(R_X, -1, center_idx_X + 1).squeeze(-1)
+    
+    Rm_Y = torch.gather(R_Y, -1, center_idx_Y - 1).squeeze(-1)
+    R0_Y = torch.gather(R_Y, -1, center_idx_Y).squeeze(-1)
+    Rp_Y = torch.gather(R_Y, -1, center_idx_Y + 1).squeeze(-1)
+    
+    def get_sigma(Rm, R0, Rp, center_idx):
+        # 1. Compute Base Variance of the peak (Texture Sharpness)
         den = 2 * (torch.log(Rm) + torch.log(Rp) - 2 * torch.log(R0))
-        # Add epsilon to prevent div by zero
         den = den - eps 
         
         var = -2.0 / den
-        sigma = torch.sqrt(torch.clamp(var, 0.0, 100.0))
+        
+        # Clamp mathematical explosions to physical threshold (10.0px variance)
+        var = torch.where(var < 0, torch.tensor(10.0, device=var.device), var)
+        
+        # 2. Compute sub-pixel shift delta from the prediction origin
+        num = torch.log(Rm) - torch.log(Rp)
+        x0 = num / den
+        
+        # Center index 2 corresponds to 0 shift.
+        discrete_shift = center_idx.squeeze(-1).float() - 2.0
+        delta = discrete_shift + x0
+        
+        # 3. Explicit requested isolation: Distance-based uncertainty ONLY.
+        total_var = (delta ** 2)
+        
+        sigma = torch.sqrt(torch.clamp(total_var, min=0.0, max=100.0))
         return sigma
 
-    sigma_u = get_sigma(R_mx, R_0, R_px)
-    sigma_v = get_sigma(R_my, R_0, R_py)
+    sigma_u = get_sigma(Rm_X, R0_X, Rp_X, center_idx_X)
+    sigma_v = get_sigma(Rm_Y, R0_Y, Rp_Y, center_idx_Y)
     
     # (B, 2, H, W) -> (B, H, W, 2)
     uncert = torch.cat((sigma_u, sigma_v), dim=1).permute(0, 2, 3, 1)
