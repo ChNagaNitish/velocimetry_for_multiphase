@@ -77,8 +77,7 @@ python tracker.py \
 - `--use_clahe`: Apply Contrast Limited Adaptive Histogram Equalization to the video.
 - `--win_h X --win_w Y`: Average the dense flow fields spatially into `X` by `Y` blocks before saving to HDF5. Default `4 4`.
 - `--throat_loc y x`: Pass the pixel coordinates of the throat to save to metadata (required for some downstream post-processing).
-- `--rotate_angle DEG`: Pre-rotate the image by `DEG` degrees (CCW) before cropping. Useful for aligning sloped walls horizontally. Default `0.0`.
-- `--rotate_center y x`: Center of rotation in pixel coordinates. Required when `--rotate_angle` is non-zero.
+- `--rotate_angle DEG`: Pre-rotate the image by `DEG` degrees (CCW) around `--throat_loc` before cropping. Useful for aligning sloped walls horizontally. Default `0.0`. Requires `--throat_loc`.
 
 ---
 

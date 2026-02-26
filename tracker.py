@@ -23,7 +23,7 @@ def main(args):
         clahe_tile_size=args.clahe_tile_size,
         max_frames=args.frames,
         rotate_angle=args.rotate_angle,
-        rotate_center=tuple(args.rotate_center) if args.rotate_center else None
+        rotate_center=tuple(args.throat_loc) if args.throat_loc else None
     )
     
     # 2. Setup Model
@@ -95,8 +95,6 @@ def main(args):
         metadata['throat_loc_px'] = args.throat_loc
     if args.rotate_angle != 0.0:
         metadata['rotate_angle'] = args.rotate_angle
-    if args.rotate_center is not None:
-        metadata['rotate_center'] = args.rotate_center
     
     writer = HDF5Writer(
         output_path=output_path,
@@ -158,9 +156,12 @@ if __name__ == '__main__':
     # Physical reference
     parser.add_argument('--throat_loc', type=int, nargs=2, default=None, help='Throat location in pixels (y, x)')
 
-    # Pre-rotation
-    parser.add_argument('--rotate_angle', type=float, default=0.0, help='Pre-rotation angle in degrees (positive = CCW)')
-    parser.add_argument('--rotate_center', type=int, nargs=2, default=None, help='Rotation center in pixels (y, x). Required if rotate_angle != 0.')
+    # Pre-rotation (uses throat_loc as rotation center)
+    parser.add_argument('--rotate_angle', type=float, default=0.0, help='Pre-rotation angle in degrees (positive = CCW). Requires --throat_loc.')
 
     args = parser.parse_args()
+    
+    if args.rotate_angle != 0.0 and args.throat_loc is None:
+        parser.error('--throat_loc is required when --rotate_angle is non-zero.')
+    
     main(args)
