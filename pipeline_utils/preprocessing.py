@@ -2,6 +2,26 @@ import cv2
 import numpy as np
 import torch
 
+def rotate_frame(frame, center, angle_deg):
+    """
+    Rotates a frame around a center point by angle_deg degrees.
+    
+    Args:
+        frame: numpy array (H, W) or (H, W, C)
+        center: tuple (y, x) — the rotation center in pixel coordinates
+        angle_deg: rotation angle in degrees (positive = counter-clockwise)
+    
+    Returns:
+        Rotated frame with same dimensions, using replicate border padding.
+    """
+    h, w = frame.shape[:2]
+    # cv2 expects center as (x, y)
+    cv2_center = (float(center[1]), float(center[0]))
+    M = cv2.getRotationMatrix2D(cv2_center, angle_deg, 1.0)
+    rotated = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+
 def crop_frame(frame, roi):
     """
     Crops a frame using the given ROI tuple (y_start, y_end, x_start, x_end).

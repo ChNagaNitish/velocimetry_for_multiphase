@@ -245,7 +245,7 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = None
 
-    profile_scale_px = 1.0  # Scale tuning for the profile plot size
+    profile_scale_px = 2.0  # 2px for 1m/s scale
     
     # Advance 1 video frame to align with flow arrays
     ret, _ = cap.read()
@@ -260,15 +260,19 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
         
         with h5py.File(h5_filepath, 'r') as f:
             vel = f['velocity'][k]
+            uncert = f['uncertainty'][k] if 'uncertainty' in f else None
             
         u = vel[..., 0] * scale_fac
         v = -vel[..., 1] * scale_fac
         mag = np.sqrt(u**2 + v**2)
         
+        if uncert is not None:
+            sigma_u = uncert[..., 0] * scale_fac
+        
         fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
         
         ax.imshow(img_rgb)
-        contour = ax.imshow(mag, cmap='jet', alpha=0.4, extent=extent, vmin=0, vmax=np.nanpercentile(mag, 98))
+        contour = ax.imshow(mag, cmap='jet', alpha=0.4, extent=extent, vmin=0, vmax=13.0)
         
         # Add colorbar 
         cbar = plt.colorbar(contour, ax=ax, fraction=0.046, pad=0.04)
@@ -280,6 +284,14 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
             
             # Baseline zero reference
             ax.axvline(x=x_base_px, color='white', linestyle='--', alpha=0.4)
+            
+            if uncert is not None:
+                su_prof = sigma_u[:, idx_x]
+                ax.fill_betweenx(y_px, 
+                                 x_base_px + (u_prof - su_prof) * profile_scale_px,
+                                 x_base_px + (u_prof + su_prof) * profile_scale_px,
+                                 color='red', alpha=0.3)
+                
             # Extracted profile at instantaneous frame
             ax.plot(x_base_px + u_prof * profile_scale_px, y_px, color='red', linewidth=1.5)
             

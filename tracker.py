@@ -21,7 +21,9 @@ def main(args):
         use_clahe=args.use_clahe,
         clahe_clip_limit=args.clahe_clip_limit,
         clahe_tile_size=args.clahe_tile_size,
-        max_frames=args.frames
+        max_frames=args.frames,
+        rotate_angle=args.rotate_angle,
+        rotate_center=tuple(args.rotate_center) if args.rotate_center else None
     )
     
     # 2. Setup Model
@@ -91,6 +93,10 @@ def main(args):
     }
     if args.throat_loc is not None:
         metadata['throat_loc_px'] = args.throat_loc
+    if args.rotate_angle != 0.0:
+        metadata['rotate_angle'] = args.rotate_angle
+    if args.rotate_center is not None:
+        metadata['rotate_center'] = args.rotate_center
     
     writer = HDF5Writer(
         output_path=output_path,
@@ -151,6 +157,10 @@ if __name__ == '__main__':
     
     # Physical reference
     parser.add_argument('--throat_loc', type=int, nargs=2, default=None, help='Throat location in pixels (y, x)')
+
+    # Pre-rotation
+    parser.add_argument('--rotate_angle', type=float, default=0.0, help='Pre-rotation angle in degrees (positive = CCW)')
+    parser.add_argument('--rotate_center', type=int, nargs=2, default=None, help='Rotation center in pixels (y, x). Required if rotate_angle != 0.')
 
     args = parser.parse_args()
     main(args)

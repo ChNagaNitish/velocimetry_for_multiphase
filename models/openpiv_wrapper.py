@@ -116,6 +116,6 @@ class OpenPIVModel(BaseOpticalFlowModel):
             
         # Compute uncertainty on the CPU
         flow_tensor = torch.from_numpy(flow_out).permute(0, 3, 1, 2)
-        uncert_out = compute_uncertainty_batch(image1_batch, image2_batch, flow_tensor, window_size=32)
+        uncert_out = compute_uncertainty_batch(image1_batch, image2_batch, flow_tensor, window_size=8)
             
         return flow_out, uncert_out

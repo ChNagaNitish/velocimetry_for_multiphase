@@ -12,13 +12,13 @@ It features integrated Live Uncertainty Estimation and a rich suite of post-proc
 ```mermaid
 graph TD
     A[Input Video:<br>.cine or .avi] --> B(VideoPairDataset:<br>PyTorch DataLoader)
-    B -->|Grayscale + CLAHE <br> Normalization| C{Model Selector}
+    B -->|Rotation + Crop + CLAHE <br> Normalization| C{Model Selector}
     
     C -->|--method raft| D[RAFT Optical Flow<br>Multi-GPU DataParallel]
     C -->|--method openpiv| E[OpenPIV<br>HPC SLURM Safe CPU Pool]
     C -->|--method farneback| F[Farneback<br>OpenCV OpenMP]
     
-    D --> G{Uncertainty Engine:<br>Batched 32x32 NCC Peak Fit}
+    D --> G{Uncertainty Engine:<br>NCC 8x8 Peak Shift}
     E --> G
     F --> G
     
@@ -77,6 +77,8 @@ python tracker.py \
 - `--use_clahe`: Apply Contrast Limited Adaptive Histogram Equalization to the video.
 - `--win_h X --win_w Y`: Average the dense flow fields spatially into `X` by `Y` blocks before saving to HDF5. Default `4 4`.
 - `--throat_loc y x`: Pass the pixel coordinates of the throat to save to metadata (required for some downstream post-processing).
+- `--rotate_angle DEG`: Pre-rotate the image by `DEG` degrees (CCW) before cropping. Useful for aligning sloped walls horizontally. Default `0.0`.
+- `--rotate_center y x`: Center of rotation in pixel coordinates. Required when `--rotate_angle` is non-zero.
 
 ---
 
@@ -316,23 +318,19 @@ This section details the mathematical basis for the live per-frame uncertainty e
 
 ### 1. Per-Frame Uncertainty Estimation
 
-The uncertainty of individual displacement vectors is computed using a **Window-Smoothed Sub-Pixel Correlation Fit**.
+The uncertainty of individual displacement vectors is computed using **NCC Peak Shift Analysis** — a correlation-based method inspired by PIV Correlation Statistics (Wieneke, 2015).
 
-For each interrogation window $N = w_h \times w_w$ pixels, we evaluate the matching uncertainty between the intensity pattern $I_1$ in the first frame and $I_2$ in the second frame. Because small, dense windows (like RAFT flow blocks) lack sufficient image gradients to calculate stable uncertainties independently, we simulate the correlation response of a larger PIV window via spatial smoothing.
+After the optical flow algorithm predicts a displacement field, frame 2 is backward-warped onto frame 1 using the predicted flow. In a perfect measurement, the warped frame would exactly match frame 1. We then search a local $8 \times 8$ window of integer pixel shifts around the warped position and compute the Normalized Cross-Correlation (NCC) at each shift. The sub-pixel peak of this NCC surface — found via 3-point Gaussian fitting — indicates where the *true* best match lies. The distance between this peak and the zero-shift position (where the tracker placed it) is the uncertainty.
 
-1.  **Image-Resolution Warping**: The second image $I_2$ is warped back towards $I_1$ using the integer displacement field $(\mathbf{u}, \mathbf{v})$ obtained from the AI/Optical Flow matching to align structures to sub-pixel precision:
-    $$ I_2^w(\mathbf{x}) = I_2(\mathbf{x} + \mathbf{u}(\mathbf{x})) $$
+1.  **Backward Warp**: Frame 2 is warped using the predicted flow: $I_2^w = \text{Warp}(I_2, \mathbf{F}_{12})$
+2.  **NCC Search**: For each integer shift $(\Delta x, \Delta y) \in [-4, +4]$, compute the local windowed NCC:  
+    $$ R(\Delta x, \Delta y) = \text{NCC}(I_1, \text{Shift}(I_2^w, \Delta x, \Delta y)) $$
+3.  **Sub-Pixel Peak**: A 3-point Gaussian fit along each axis locates the sub-pixel peak $\delta$:  
+    $$ \delta = \frac{\ln R_{-1} - \ln R_{+1}}{2(\ln R_{-1} + \ln R_{+1} - 2 \ln R_0)} $$
+4.  **Uncertainty**: The peak shift magnitude is the per-pixel uncertainty:  
+    $$ \sigma_u(t) = |\delta_u|, \quad \sigma_v(t) = |\delta_v| $$
 
-2.  **Shifted Match Matrices**: We shift Frame 2 locally by $\pm 2$ pixels in X and Y (creating an $8\times8$ physical search sweep). 
-
-3.  **Local Template Matching**: For every shift, a local $4\times 4$ Zero-Mean Normalized Cross-Correlation (ZNCC) is mathematically isolated. This structural block-matching yields a true $5\times 5$ correlation peak surface uniquely computed for every single pixel coordinate concurrently.
-
-4.  **Gaussian Sub-Pixel Tracking Error ($\Delta^2$)**: A standard 3-point 1D Gaussian mathematical curve fit is independently evaluated in $x$ and $y$ around the maximum of the localized $5\times 5$ sub-pixel correlation surface to locate the true empirical structural origin. 
-
-The distance between the predicted flow vector origin `(0, 0)` and the empirical sub-pixel correlation true origin is extracted as the decoupled peak shift offset $\Delta$. 
-The uncertainty explicitly isolates this geometric Particle Tracking Error, completely discarding the ambient texture variance:
-$$ \text{Var}(X) = \Delta^2 $$ 
-This yields a high-fidelity, completely unbounded per-vector, per-frame tracking failure measurement $\sigma_u(t)$ and $\sigma_v(t)$ directly mirroring physical coordinate prediction deviations.
+This method directly measures how far the tracker's prediction deviates from where correlation analysis says the true match is, making it sensitive to algorithm quality rather than image texture.
 
 ### 2. Propagation to Time-Averaged Statistics
 
@@ -343,7 +341,6 @@ The time-averaged velocity $\bar{u}$ is:
 $$ \bar{u} = \frac{1}{T} \sum_{t=1}^{T} u(t) $$
 
 The variance of the mean, assuming independent measurement errors, is the sum of variances scaled by $1/T^2$:
-$$ \text{Var}(\bar{u}) = \sum_{t=1}^{T} \left( \frac{\partial \bar{u}}{\partial u(t)} \sigma_u(t) \right)^2 = \sum_{t=1}^{T} \left( \frac{1}{T} \sigma_u(t) \right)^2 $$
 $$ \sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \sigma_u^2(t)} $$
 
 *Note: For large $T$, this value appropriately decreases as $1/\sqrt{T}$. Even in highly unsteady flow, random measurement error averages out; physical unsteadiness is preserved in the Reynolds stresses instead.*
@@ -352,12 +349,7 @@ $$ \sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \sigma_u^2(t)} $$
 The Reynolds normal stress $\langle u'u' \rangle$ is defined as the variance of the velocity fluctuations:
 $$ \langle u'u' \rangle = \frac{1}{T} \sum_{t=1}^{T} (u(t) - \bar{u})^2 $$
 
-To estimate the uncertainty $\sigma_{\langle u'u' \rangle}$, we use the standard error propagation formula (linearized approximation / delta method).
-Let $f = \langle u'u' \rangle$. The sensitivity of $f$ to a single measurement $u(t)$ is:
-$$ \frac{\partial f}{\partial u(t)} \approx \frac{2}{T} (u(t) - \bar{u}) $$
-
-The propagated variance is therefore:
-$$ \text{Var}(\langle u'u' \rangle) = \sum_{t=1}^{T} \left( \frac{\partial f}{\partial u(t)} \sigma_u(t) \right)^2 $$
+Using standard error propagation (delta method):
 $$ \sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum_{t=1}^{T} (u(t) - \bar{u})^2 \sigma_u^2(t)} $$
 
 Correlation terms like shear stress $\langle u'v' \rangle$ follow a similar derivation, accounting for errors in both $u$ and $v$:
@@ -367,7 +359,7 @@ $$ \sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \left[ (v(t)
 
 | Quantity | Symbol | Uncertainty Formula |
 | :--- | :--- | :--- |
-| **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \text{Sub-Pixel Particle Tracking Offset Distance } (\Delta)$ |
+| **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \|\delta_u\|$ (NCC 8×8 peak shift) |
 | **Mean Velocity** | $\bar{u}$ | $\sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum \sigma_u^2(t)}$ |
 | **Reynolds Normal Stress** | $\langle u'u' \rangle$ | $\sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum (u-\bar{u})^2 \sigma_u^2(t)}$ |
 | **Reynolds Shear Stress** | $\langle u'v' \rangle$ | $\sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum [ (v-\bar{v})^2 \sigma_u^2(t) + (u-\bar{u})^2 \sigma_v^2(t) ]}$ |

@@ -75,7 +75,7 @@ class RAFTOpticalFlow(BaseOpticalFlowModel):
             flow_up = flow_up_pad[..., c[0]:c[1], c[2]:c[3]]
             
             # Compute dense uncertainty directly on the GPU using the batched inputs and flow
-            uncert_out = compute_uncertainty_batch(b_image1, b_image2, flow_up, window_size=32)
+            uncert_out = compute_uncertainty_batch(b_image1, b_image2, flow_up, window_size=8)
             
         # (B, 2, H, W) -> (B, H, W, 2)
         flow_up = flow_up.permute(0, 2, 3, 1).cpu().numpy()
