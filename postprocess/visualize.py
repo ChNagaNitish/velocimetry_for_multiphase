@@ -3,55 +3,71 @@ import numpy as np
 import h5py
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from pipeline_utils.preprocessing import rotate_frame, crop_frame
+
+def _get_processed_metadata(velData, width, height):
+    """Helper to extract and compute geometric properties from HDF5 attributes."""
+    attrs = dict(velData.attrs)
+    roi = list(attrs.get('roi', [0, -1, 0, -1]))
+    if roi[1] == -1: roi[1] = height
+    if roi[3] == -1: roi[3] = width
+    
+    rotate_angle = attrs.get('rotate_angle', 0.0)
+    throat_loc = attrs.get('throat_loc_px', None)
+    
+    win_w = int(attrs.get('window_width', 1))
+    win_h = int(attrs.get('window_height', 1))
+    
+    out_height = roi[1] - roi[0]
+    out_width = roi[3] - roi[2]
+    
+    return roi, rotate_angle, throat_loc, win_w, win_h, out_height, out_width
+
+def _align_frame(frame, throat_loc, rotate_angle, roi):
+    """Applies rotation and cropping to align the raw video frame with the HDF5 data fields."""
+    if rotate_angle != 0.0 and throat_loc is not None:
+        frame = rotate_frame(frame, tuple(throat_loc), rotate_angle)
+    return crop_frame(frame, roi)
 
 def create_quiver_video(video_path, h5_filepath, output_path, scale=2.0, skip=16):
     """
-    Overlays a sparse velocity vector field (quiver plot) onto the original video frames.
+    Overlays a sparse velocity vector field (quiver plot) onto the aligned video frames.
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    
     with h5py.File(h5_filepath, 'r') as f:
         velData = f['velocity']
         frames = velData.shape[0]
         
-        roi = list(velData.attrs.get('roi', [0, -1, 0, -1]))
-        if roi[1] == -1: roi[1] = height
-        if roi[3] == -1: roi[3] = width
-        y0, y1, x0, x1 = roi[0], roi[1], roi[2], roi[3]
+        roi, rotate_angle, throat_loc, win_w, win_h, out_height, out_width = _get_processed_metadata(velData, width, height)
         
-        win_w = int(velData.attrs.get('window_width', 1))
-        win_h = int(velData.attrs.get('window_height', 1))
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (out_width, out_height))
         
-        # Read first frame to match indexing (N frames -> N-1 velocity fields)
         ret, _ = cap.read() 
         
         for k in tqdm(range(frames), desc="Rendering Quiver Video"):
             ret, frame = cap.read()
-            if not ret:
-                break
-                
+            if not ret: break
+            
+            frame = _align_frame(frame, throat_loc, rotate_angle, roi)
+            
             u = velData[k, :, :, 0]
             v = velData[k, :, :, 1]
             Ny, Nx = u.shape
-            
-            # Map directly from HDF5 matrix indices to physical block centers
+             
             for j in range(0, Ny, skip):
                 for i in range(0, Nx, skip):
                     du = int(u[j, i] * scale)
                     dv = int(v[j, i] * scale)
                     
                     if du != 0 or dv != 0:
-                        # Global frame coordinates relative to ROI starting point and window center
-                        y_glob = y0 + (j * win_h) + (win_h // 2)
-                        x_glob = x0 + (i * win_w) + (win_w // 2)
-                        
-                        cv2.arrowedLine(frame, (x_glob, y_glob), (x_glob + du, y_glob + dv), (0, 0, 255), 1, tipLength=0.3)
+                        y_loc = (j * win_h) + (win_h // 2)
+                        x_loc = (i * win_w) + (win_w // 2)
+                        cv2.arrowedLine(frame, (x_loc, y_loc), (x_loc + du, y_loc + dv), (0, 0, 255), 1, tipLength=0.3)
                         
             out.write(frame)
             
@@ -60,52 +76,34 @@ def create_quiver_video(video_path, h5_filepath, output_path, scale=2.0, skip=16
 
 def create_quiver_image(video_path, h5_filepath, output_path, frame_idx=0, scale=2.0, skip=16):
     """
-    Overlays a sparse velocity vector field (quiver plot) onto a single video frame and saves as an image.
+    Overlays a sparse velocity vector field onto a single aligned video frame, saved as an image.
     """
     cap = cv2.VideoCapture(video_path)
-    
-    # +1 because optical flow for index k corresponds to motion between frame k and k+1.
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx + 1)
     ret, frame = cap.read()
-    
-    if not ret:
-        print(f"Error reading frame {frame_idx+1} from video.")
-        cap.release()
-        return
+    if not ret: return
         
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     with h5py.File(h5_filepath, 'r') as f:
         velData = f['velocity']
-        if frame_idx >= velData.shape[0]:
-            print(f"Error: frame_idx {frame_idx} is out of bounds for velocity data with {velData.shape[0]} frames.")
-            cap.release()
-            return
-            
-        roi = list(velData.attrs.get('roi', [0, -1, 0, -1]))
-        if roi[1] == -1: roi[1] = height
-        if roi[3] == -1: roi[3] = width
-        y0, y1, x0, x1 = roi[0], roi[1], roi[2], roi[3]
+        roi, rotate_angle, throat_loc, win_w, win_h, out_height, out_width = _get_processed_metadata(velData, width, height)
         
-        win_w = int(velData.attrs.get('window_width', 1))
-        win_h = int(velData.attrs.get('window_height', 1))
-            
+        frame = _align_frame(frame, throat_loc, rotate_angle, roi)
+        
         u = velData[frame_idx, :, :, 0]
         v = velData[frame_idx, :, :, 1]
         Ny, Nx = u.shape
         
-    # Map directly from HDF5 matrix indices to physical block centers
     for j in range(0, Ny, skip):
         for i in range(0, Nx, skip):
             du = int(u[j, i] * scale)
             dv = int(v[j, i] * scale)
-            
             if du != 0 or dv != 0:
-                y_glob = y0 + (j * win_h) + (win_h // 2)
-                x_glob = x0 + (i * win_w) + (win_w // 2)
-                
-                cv2.arrowedLine(frame, (x_glob, y_glob), (x_glob + du, y_glob + dv), (0, 0, 255), 1, tipLength=0.3)
+                y_loc = (j * win_h) + (win_h // 2)
+                x_loc = (i * win_w) + (win_w // 2)
+                cv2.arrowedLine(frame, (x_loc, y_loc), (x_loc + du, y_loc + dv), (0, 0, 255), 1, tipLength=0.3)
                 
     cv2.imwrite(output_path, frame)
     cap.release()
@@ -148,68 +146,59 @@ def create_spacetime_diagram(video_path, roi):
 def create_contour_video(video_path, h5_filepath, dataset_name, output_path, alpha=0.5):
     """
     Overlays a translucent scalar field (e.g., uncertainty, divergence) as a heatmap
-    onto the original grayscale video.
+    onto the aligned grayscale video.
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    
     with h5py.File(h5_filepath, 'r') as f:
         data = f[dataset_name][:]
+        velData = f['velocity'] if 'velocity' in f else f[dataset_name]
+        roi, rotate_angle, throat_loc, win_w, win_h, out_height, out_width = _get_processed_metadata(velData, width, height)
         
-        # Determine strict global colormap bounds (e.g. 5th to 95th percentile)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (out_width, out_height))
+        
         flat_data = data.flatten()
         flat_data = flat_data[np.isfinite(flat_data)]
         vmin, vmax = np.percentile(flat_data, [5, 95])
-        
         frames = data.shape[0]
         
-        # Advance 1 video frame to align with flow arrays
         ret, _ = cap.read()
         
         for k in tqdm(range(frames), desc=f"Rendering {dataset_name} Contour Video"):
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret: break
+            
+            frame = _align_frame(frame, throat_loc, rotate_angle, roi)
                 
             scalar_field = data[k]
-            # Handle norm vector fields like uncertainty (u, v) -> magnitude
             if scalar_field.ndim == 3 and scalar_field.shape[-1] == 2:
                 scalar_field = np.linalg.norm(scalar_field, axis=2)
                 
-            scalar_resized = cv2.resize(scalar_field, (width, height), interpolation=cv2.INTER_LINEAR)
-            
-            # Normalize to [0, 255]
+            scalar_resized = cv2.resize(scalar_field, (out_width, out_height), interpolation=cv2.INTER_LINEAR)
             normed = np.clip((scalar_resized - vmin) / (vmax - vmin), 0, 1) * 255
             normed = normed.astype(np.uint8)
-            
-            # Apply JET colormap
             heatmap = cv2.applyColorMap(normed, cv2.COLORMAP_JET)
             
-            # Blend
             blended = cv2.addWeighted(frame, 1 - alpha, heatmap, alpha, 0)
             out.write(blended)
             
-    cap.release()
     cap.release()
     out.release()
 
 def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, fps=10):
     """
     Renders an mp4 video overlaying 10 equidistant instantaneous U-velocity profiles 
-    on top of the velocity magnitude heatmap and raw camera frames.
+    on top of the velocity magnitude heatmap and aligned camera frames.
     """
     import matplotlib.pyplot as plt
     from tqdm import tqdm
     
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Error opening video {video_path}")
-        return
+    if not cap.isOpened(): return
         
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -217,45 +206,30 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
     with h5py.File(h5_filepath, 'r') as f:
         velData = f['velocity']
         attrs = dict(velData.attrs)
+        roi, rotate_angle, throat_loc, win_w, win_h, out_height, out_width = _get_processed_metadata(velData, width, height)
         
         mm_per_px = attrs.get('mm_per_px', 1.0)
         fps_capture = attrs.get('fps_capture', 1.0)
-        win_w = int(attrs.get('window_width', 1))
-        win_h = int(attrs.get('window_height', 1))
-        roi = list(attrs.get('roi', [0, -1, 0, -1]))
-        
         n_frames = velData.shape[0]
         Ny, Nx = velData.shape[1:3]
         
     scale_fac = mm_per_px * 1e-3 * fps_capture
+    extent = [0, out_width, out_height, 0]
     
-    if roi[1] == -1: roi[1] = height
-    if roi[3] == -1: roi[3] = width
-    y0, x0 = roi[0], roi[2]
-    
-    # Pre-calculate spatial grids
-    extent = [0, width, height, 0]
-    
-    # 10 equidistant indices along Nx
     x_indices = np.linspace(0, Nx - 1, num_profiles, dtype=int)
-    
-    # Construct y pixel locations matching velocity columns
-    y_px = y0 + (np.arange(Ny) * win_h) + (win_h / 2.0)
+    y_px = (np.arange(Ny) * win_h) + (win_h / 2.0)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = None
-
-    profile_scale_px = 2.0  # 2px for 1m/s scale
-    
-    # Advance 1 video frame to align with flow arrays
+    profile_scale_px = 2.0 
     ret, _ = cap.read()
     
     print(f"Generating profile intersection animation at {fps} fps...")
     for k in tqdm(range(n_frames), desc="Rendering Profile Video"):
         ret, frame = cap.read()
-        if not ret:
-            break
+        if not ret: break
             
+        frame = _align_frame(frame, throat_loc, rotate_angle, roi)
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         with h5py.File(h5_filepath, 'r') as f:
@@ -270,19 +244,16 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
             sigma_u = uncert[..., 0] * scale_fac
         
         fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
-        
         ax.imshow(img_rgb)
         contour = ax.imshow(mag, cmap='jet', alpha=0.4, extent=extent, vmin=0, vmax=13.0)
         
-        # Add colorbar 
         cbar = plt.colorbar(contour, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label('Velocity Magnitude (m/s)')
         
         for idx_x in x_indices:
-            x_base_px = x0 + (idx_x * win_w) + (win_w / 2.0)
+            x_base_px = (idx_x * win_w) + (win_w / 2.0)
             u_prof = u[:, idx_x]
             
-            # Baseline zero reference
             ax.axvline(x=x_base_px, color='white', linestyle='--', alpha=0.4)
             
             if uncert is not None:
@@ -292,18 +263,16 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
                                  x_base_px + (u_prof + su_prof) * profile_scale_px,
                                  color='red', alpha=0.3)
                 
-            # Extracted profile at instantaneous frame
             ax.plot(x_base_px + u_prof * profile_scale_px, y_px, color='red', linewidth=1.5)
             
         ax.set_title(f"Instantaneous Profile Flow field (Frame {k})")
-        ax.set_xlim(0, width)
-        ax.set_ylim(height, 0)
+        ax.set_xlim(0, out_width)
+        ax.set_ylim(out_height, 0)
         ax.axis('off')
         
         fig.tight_layout(pad=0)
         fig.canvas.draw()
         
-        # Convert matplotlib canvas to CV2 BGR array
         img_rgba = np.asarray(fig.canvas.buffer_rgba())
         img_bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
         
@@ -316,6 +285,7 @@ def create_profile_video(video_path, h5_filepath, output_path, num_profiles=10, 
     cap.release()
     if out is not None:
         out.release()
+
 
 def set_journal_style(column_type='single'):
     """
