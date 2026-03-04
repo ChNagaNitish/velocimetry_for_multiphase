@@ -276,7 +276,9 @@ Save the following block as `jobScript.sh`. You might have to run `chmod +x jobS
 #!/bin/bash
 # 
 #SBATCH -t 0-02:00:00 
-#SBATCH -N 1 
+#SBATCH -N 1
+#SBACTH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
 #SBATCH --account=cavitation 
 #SBATCH --partition=a30_normal_q 
 #SBATCH --gres=gpu:1 
@@ -294,7 +296,7 @@ module load CUDA/12.6.0
 source "$HOME/NAME-OF-THE-ENV/bin/activate" 
 
 # Run the algorithm
-python3 tracker.py --method raft --model weights/raft-sintel.pth --path /home/your-pid/experiment/48.avi 
+python3 tracker.py --method raft --model weights/raft-cloudcav.pth --path /home/your-pid/experiment/48.avi 
 ```
 *Note: This script asks for 1 GPU using the "cavitation" account and "a30_normal_q" partition for 2 hours.*
 
