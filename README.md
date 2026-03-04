@@ -36,6 +36,22 @@ graph TD
 
 ---
 
+## 💡 Best Practices and Recommendations
+
+For optimal tracking accuracy and significantly easier downstream analysis, we highly recommend perfectly aligning and cropping your flow geometry *before* running the optical flow tracking.
+
+### 1. Rotate the Geometry Upfront
+If your physics domain features tilted or sloped sections (such as a divergent wall angle), use the `--rotate_angle` parameter during tracking to physically level the image. 
+* **Recommendation:** By supplying `--throat_loc Y X` alongside `--rotate_angle`, the pipeline will automatically use the throat as the center of rotation. Rotate the image until the divergent wall is perfectly horizontal.
+* **Why?** Making the primary boundary horizontal drastically simplifies all subsequent post-processing. When extracting vertical flow profiles, plotting spacetime diagrams, or measuring cavity lengths along the wall, you won't need to apply complex spatial transformations to account for the angled geometry. Your primary downstream flow direction will perfectly align with the Cartesian X-axis, and your normal boundary layer with the Y-axis.
+
+### 2. Set a Strict Region of Interest (ROI)
+Always crop the raw cinematic files down to exactly the fluid domain of interest using the `--roi` argument.
+* **Recommendation:** You can often take the whole width of the image, but you should usually limit it in the vertical axis to bound the active flow area and crop out the static walls/channels.
+* **Why?** It prevents the tracking models (especially RAFT) from wasting computation on static background elements, metal blocks, or unused camera space. Keeping the ROI tightly bounding the fluid domain improves tracking focus, massively reduces overall processing time, and dramatically shrinks the exported `.h5` file sizes.
+
+---
+
 ## 🚀 Running Velocimetry (Inference)
 
 The main entry point for inference is `tracker.py`.
