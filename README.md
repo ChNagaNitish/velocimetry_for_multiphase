@@ -50,6 +50,16 @@ Always crop the raw cinematic files down to exactly the fluid domain of interest
 * **Recommendation:** You can often take the whole width of the image, but you should usually limit it in the vertical axis to bound the active flow area and crop out the static walls/channels.
 * **Why?** It prevents the tracking models (especially RAFT) from wasting computation on static background elements, metal blocks, or unused camera space. Keeping the ROI tightly bounding the fluid domain improves tracking focus, massively reduces overall processing time, and dramatically shrinks the exported `.h5` file sizes.
 
+### 3. Use the CloudCav Model for RAFT
+When using RAFT (`--method raft`) on fluid experiments, we highly recommend using the `raft-cloudcav.pth` weights instead of standard computer-vision weights.
+* **Recommendation:** Pass `--model raft-cloudcav.pth` in your tracking commands for multiphase/fluid flows. (Ensure the weights file is downloaded to the `weights/` directory).
+* **Why?** The `raft-cloudcav.pth` model has been explicitly fine-tuned on datasets specific to complex fluid dynamics and multiphase flows (such as cavitation, bubbles, and turbulent structures). It tracks deformable, fluid-like motion significantly better than baseline models trained purely on rigid-body tracking datasets (like Sintel or KITTI).
+
+### 4. Prefer `.cine` over `.avi` Files
+When exporting from your high-speed camera software, export directly to the uncompressed `.cine` format instead of `.avi` whenever storage permits.
+* **Recommendation:** Supply `--path data/recording_1.cine` directly to the tracker instead of converting it to an AVI sequence.
+* **Why?** `.cine` files retain the raw 12-bit (or 14-bit) dynamic range from the camera sensor, whereas `.avi` files are heavily compressed and downmixed to 8-bit space. Maintaining the uncompressed 12-bit resolution preserves very faint density/lighting gradients in fluid structures, giving the optical flow and cross-correlation engines a significantly higher Signal-to-Noise Ratio (SNR) to lock onto.
+
 ---
 
 ## 🚀 Running Velocimetry (Inference)
