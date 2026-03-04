@@ -72,7 +72,7 @@ RAFT is the most accurate method. It requires a trained `.pth` weight file (plac
 ```bash
 python tracker.py \
   --method raft \
-  --model c1.pth \
+  --model weights/raft-cloudcav.pth \
   --path data/recording_1.cine \
   --use_clahe
 ```
