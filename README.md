@@ -85,7 +85,7 @@ python tracker.py \
 
 The `visualize_results.py` script bridges the `.h5` output with physical analysis. 
 
-> **Prerequisite:** You must supply the original `--video` alongside the generated `--h5` for single-file analysis so the visualizer can construct spatial axes correctly based on video dimensions.
+> **Prerequisite:** You must supply the original `--video` alongside the generated `--h5` for single-file analysis. The visualizer will automatically extract the `roi`, `rotate_angle` and `throat_loc_px` metadata saved during analysis, and correctly align, rotate, and crop the raw video frame before rendering the vector/contour overlays onto it.
 
 ### 1. Basic Inspections (Fields of View)
 
