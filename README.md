@@ -263,7 +263,7 @@ pip3 install numpy scipy tqdm pyarrow pandas fastparquet opencv-python torch mat
 ### 4. Cloning the Repository
 After all the prerequisites are met, we can run the code. If not done before, create an account on GitHub and fork the repository (or directly clone it):
 ```bash
-git clone https://github.com/ChNagaNitish/optical-flow-cloud-cavitation.git
+git clone https://github.com/ChNagaNitish/velocimetry_for_multiphase.git
 cd optical-flow-cloud-cavitation
 ```
 
