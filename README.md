@@ -135,6 +135,7 @@ python visualize_results.py \
 
 # Time-Averaged Fields (Velocity & Reynolds Stresses images)
 python visualize_results.py \
+  --video data/recording_1.cine \
   --h5 data/recording_1_raft.h5 \
   --average
 ```
