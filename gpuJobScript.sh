@@ -14,7 +14,7 @@
 # Loading required modules
 module purge
 module reset
-module load GCC/13.3.0 Python/3.12.3-GCCcore-13.3.0
+module load GCC/13.3.0 Python/3.12.3-GCCcore-13.3.0 FFmpeg/7.0.2-GCCcore-13.3.0
 module load CUDA/12.6.0
 
 # Activate environment
