@@ -72,7 +72,7 @@ RAFT is the most accurate method. It requires a trained `.pth` weight file (plac
 ```bash
 python tracker.py \
   --method raft \
-  --model c1.pth \
+  --model weights/raft-cloudcav.pth \
   --path data/recording_1.cine \
   --use_clahe
 ```
@@ -135,6 +135,7 @@ python visualize_results.py \
 
 # Time-Averaged Fields (Velocity & Reynolds Stresses images)
 python visualize_results.py \
+  --video data/recording_1.cine \
   --h5 data/recording_1_raft.h5 \
   --average
 ```
@@ -263,7 +264,7 @@ pip3 install numpy scipy tqdm pyarrow pandas fastparquet opencv-python torch mat
 ### 4. Cloning the Repository
 After all the prerequisites are met, we can run the code. If not done before, create an account on GitHub and fork the repository (or directly clone it):
 ```bash
-git clone https://github.com/ChNagaNitish/optical-flow-cloud-cavitation.git
+git clone https://github.com/ChNagaNitish/velocimetry_for_multiphase.git
 cd optical-flow-cloud-cavitation
 ```
 
@@ -276,7 +277,9 @@ Save the following block as `jobScript.sh`. You might have to run `chmod +x jobS
 #!/bin/bash
 # 
 #SBATCH -t 0-02:00:00 
-#SBATCH -N 1 
+#SBATCH -N 1
+#SBACTH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
 #SBATCH --account=cavitation 
 #SBATCH --partition=a30_normal_q 
 #SBATCH --gres=gpu:1 
@@ -294,7 +297,7 @@ module load CUDA/12.6.0
 source "$HOME/NAME-OF-THE-ENV/bin/activate" 
 
 # Run the algorithm
-python3 tracker.py --method raft --model weights/raft-sintel.pth --path /home/your-pid/experiment/48.avi 
+python3 tracker.py --method raft --model weights/raft-cloudcav.pth --path /home/your-pid/experiment/48.avi 
 ```
 *Note: This script asks for 1 GPU using the "cavitation" account and "a30_normal_q" partition for 2 hours.*
 
