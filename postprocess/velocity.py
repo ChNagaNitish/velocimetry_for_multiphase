@@ -140,9 +140,9 @@ def compute_time_average_fields(h5_filepath, frame_start=None, frame_end=None):
             vv = sum_vv / count - vmean**2
             uv = sum_uv / count - umean * vmean
             
-            # 1. Uncertainty of Mean Velocities (Standard Error of Mean = sqrt(sum_var) / N)
-            umean_uncert = np.sqrt(sum_var_u) / count
-            vmean_uncert = np.sqrt(sum_var_v) / count
+            # 1. Uncertainty of Mean Velocities (Time-averaged instantaneous uncertainty)
+            umean_uncert = np.sqrt(sum_var_u / count)
+            vmean_uncert = np.sqrt(sum_var_v / count)
             
             # 2. Uncertainty of Reynolds Stresses (Taylor Expansion of Variance)
             # Var(uu) = (4 / N^2) * SUM [ (u_i - umean)^2 * var_u_i ]
@@ -347,9 +347,9 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
                 vv = sum_vv / count - vmean ** 2
                 uv = sum_uv / count - umean * vmean
                 
-                # Uncertainty Propagations
-                umean_uncert = np.sqrt(sum_var_u) / count
-                vmean_uncert = np.sqrt(sum_var_v) / count
+                # Uncertainty Propagations (Time-averaged instantaneous uncertainty)
+                umean_uncert = np.sqrt(sum_var_u / count)
+                vmean_uncert = np.sqrt(sum_var_v / count)
                 
                 var_uu = (4.0 / (count ** 2)) * (sum_u2_var_u - 2 * umean * sum_u_var_u + umean**2 * sum_var_u)
                 var_vv = (4.0 / (count ** 2)) * (sum_v2_var_v - 2 * vmean * sum_v_var_v + vmean**2 * sum_var_v)
