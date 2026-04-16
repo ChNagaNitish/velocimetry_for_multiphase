@@ -117,12 +117,12 @@ def main():
         else:
             out_path = os.path.join(args.out_dir, f"{base_name}_quiver.mp4")
             print(f"\n[1] Generating Quiver Video --> {out_path}")
-            create_quiver_video(args.video, args.h5, out_path, scale=args.quiver_scale, skip=args.quiver_skip)
+            create_quiver_video(args.video, args.h5, out_path, scale=args.quiver_scale, skip=args.quiver_skip, fps=args.fps)
         
     if args.contour:
         out_path = os.path.join(args.out_dir, f"{base_name}_{args.dataset}_contour.mp4")
         print(f"\n[2] Generating {args.dataset.capitalize()} Contour Video --> {out_path}")
-        create_contour_video(args.video, args.h5, dataset_name=args.dataset, output_path=out_path, alpha=args.alpha)
+        create_contour_video(args.video, args.h5, dataset_name=args.dataset, output_path=out_path, alpha=args.alpha, fps=args.fps)
         
     if args.profile_video:
         out_path = os.path.join(args.out_dir, f"{base_name}_profile_anim.mp4")
