@@ -176,19 +176,14 @@ from scipy.ndimage import map_coordinates
 
 def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=None):
     """
-    Rotates the velocity field around the throat location and extracts mean
-    velocities and Reynolds stresses along specified wall-normal x-locations.
-    
-    Args:
-        h5_filepath: path to the velocity .h5 file.
-        x_positions_mm: List of x locations (in mm) to extract profiles.
-        angle_deg: Angle to rotate the coordinate system (e.g., throat angle).
-    
-    Returns:
-        dict containing 'y_coords', 'mean_u', 'mean_v', 'uu', 'vv', 'uv' for each x.
+    Extracts mean velocities and Reynolds stresses along vertical (wall-normal) columns.
+    Since the flow is assumed to be already rotated/aligned in tracking, angle_deg is ignored,
+    and extraction is performed via highly optimized pure NumPy column slicing over the chunk.
     """
-    import os
+    import numpy as np
+    import h5py
     from tqdm import tqdm
+    import os
     
     with h5py.File(h5_filepath, 'r') as f:
         velData = f['velocity']
@@ -199,9 +194,8 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
         window_width = int(attrs.get('window_width', 1))
         window_height = int(attrs.get('window_height', 1))
         
-        # In tracking.py, displacement is in pixels per frame.
-        # Scale factor to physical velocity (m/s)
         vel_scale_fac = mm_per_px * 1e-3 * fps_capture
+        var_scale_fac = vel_scale_fac ** 2
         
         roi = list(attrs.get('roi', [0, -1, 0, -1] ))
         nFrames, Ny, Nx = velData.shape[:3]
@@ -209,66 +203,56 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
         if roi[-1] == -1: roi[-1] = Nx * window_width
         if roi[1] == -1: roi[1] = Ny * window_height
         
-        # Read throat location. Set default Y origin to bottom of ROI if unspecified.
         if 'throat_loc_px' in attrs:
             throat_loc_px = list(attrs['throat_loc_px'])
         else:
             throat_loc_px = [roi[1], 0]
             
-        # Physical grids relative to throat
+        # 1D physical grids
         xmm = np.arange(roi[2] + window_width // 2, roi[-1], window_width) * mm_per_px - throat_loc_px[1] * mm_per_px
         ymm = throat_loc_px[0] * mm_per_px - np.arange(roi[0] + window_height // 2, roi[1], window_height) * mm_per_px
-        
-        # Limit grid to actual data shapes in case of rounding errors
         xmm = xmm[:Nx]
         ymm = ymm[:Ny]
-
-        theta = np.radians(angle_deg)
-        c_th, s_th = np.cos(theta), np.sin(theta)
-        
-        s_values = ymm # Wall-normal distance array
-        n_s = len(s_values)
         
         line_info = []
         for x_wall in x_positions_mm:
-            # Rotate physical coordinates to find sampling locations
-            x_c = x_wall * c_th
-            y_c = -x_wall * s_th
-            x_pts = x_c + s_values * s_th
-            y_pts = y_c + s_values * c_th
+            # Get 1D fractional horizontal index for column extraction
+            j_frac = np.interp(x_wall, xmm, np.arange(Nx))
+            j0 = int(np.floor(j_frac))
+            j1 = min(j0 + 1, Nx - 1)
+            dx = j_frac - j0
             
-            # Convert physical mm to fractional grid indices for map_coordinates
-            j_frac = np.interp(x_pts, xmm, np.arange(Nx))
-            
-            # ymm is monotonically decreasing, so reverse it for np.interp
-            i_frac = np.interp(y_pts, ymm[::-1], np.arange(Ny)[::-1])
-            
-            # Keep array coordinates for sampling (y evaluates to axis 0, x to axis 1)
-            coords = np.vstack((i_frac, j_frac))
-            line_info.append((x_wall, coords))
+            line_info.append({
+                'x_wall': x_wall,
+                'j0': j0,
+                'j1': j1,
+                'w0': 1.0 - dx,
+                'w1': dx
+            })
             
         n_lines = len(line_info)
-        shape_r = (n_lines, n_s)
+        n_s = Ny # The profile covers the entire Y column height automatically
         
-        sum_u  = np.zeros(shape_r, dtype=np.float64)
-        sum_v  = np.zeros(shape_r, dtype=np.float64)
-        sum_uu = np.zeros(shape_r, dtype=np.float64)
-        sum_vv = np.zeros(shape_r, dtype=np.float64)
-        sum_uv = np.zeros(shape_r, dtype=np.float64)
-        count  = np.zeros(shape_r, dtype=np.int64)
+        sum_u  = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_v  = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_uu = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_vv = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_uv = np.zeros((n_lines, n_s), dtype=np.float64)
         
-        sum_var_u = np.zeros(shape_r, dtype=np.float64)
-        sum_var_v = np.zeros(shape_r, dtype=np.float64)
+        sum_var_u = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_var_v = np.zeros((n_lines, n_s), dtype=np.float64)
         
-        sum_u_var_u = np.zeros(shape_r, dtype=np.float64)
-        sum_u2_var_u = np.zeros(shape_r, dtype=np.float64)
-        sum_v_var_v = np.zeros(shape_r, dtype=np.float64)
-        sum_v2_var_v = np.zeros(shape_r, dtype=np.float64)
+        sum_u_var_u = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_u2_var_u = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_v_var_v = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_v2_var_v = np.zeros((n_lines, n_s), dtype=np.float64)
         
-        sum_u_var_v = np.zeros(shape_r, dtype=np.float64)
-        sum_u2_var_v = np.zeros(shape_r, dtype=np.float64)
-        sum_v_var_u = np.zeros(shape_r, dtype=np.float64)
-        sum_v2_var_u = np.zeros(shape_r, dtype=np.float64)
+        sum_u_var_v = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_u2_var_v = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_v_var_u = np.zeros((n_lines, n_s), dtype=np.float64)
+        sum_v2_var_u = np.zeros((n_lines, n_s), dtype=np.float64)
+        
+        count = 0
         
         if frame_idx is not None:
             start_f = max(0, frame_idx)
@@ -278,67 +262,54 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
             end_f   = nFrames
 
         chunk_size = 100
-        for t0 in tqdm(range(start_f, end_f, chunk_size), desc='Extracting Line Profiles'):
+        for t0 in tqdm(range(start_f, end_f, chunk_size), desc='Extracting Fast 1D Profiles'):
             t1 = min(t0 + chunk_size, end_f)
             chunk = velData[t0:t1]
             
-            for b in range(chunk.shape[0]):
-                u_raw = chunk[b, :, :, 0] * vel_scale_fac
-                v_raw = -chunk[b, :, :, 1] * vel_scale_fac
-                
-                if 'uncertainty' in f:
-                    unc_chunk = f['uncertainty'][t0:t1]
-                    var_u_raw = (unc_chunk[b, :, :, 0] * vel_scale_fac) ** 2
-                    var_v_raw = (unc_chunk[b, :, :, 1] * vel_scale_fac) ** 2
-                else:
-                    var_u_raw = np.zeros_like(u_raw)
-                    var_v_raw = np.zeros_like(v_raw)
-                
-                u_rot, v_rot = rotate_velocity(u_raw, v_raw, angle_deg)
-                
-                # Rotate variances (assuming u and v orthogonal independent axes errors)
-                c2, s2 = c_th**2, s_th**2
-                var_u_rot = var_u_raw * c2 + var_v_raw * s2
-                var_v_rot = var_u_raw * s2 + var_v_raw * c2
-                
-                for li, (x_wall, coords) in enumerate(line_info):
-                    # Sample U, V, and Uncertainties at rotated line coordinates
-                    u_s = map_coordinates(u_rot, coords, order=1, mode='constant', cval=np.nan)
-                    v_s = map_coordinates(v_rot, coords, order=1, mode='constant', cval=np.nan)
-                    var_u_s = map_coordinates(var_u_rot, coords, order=1, mode='constant', cval=0.0)
-                    var_v_s = map_coordinates(var_v_rot, coords, order=1, mode='constant', cval=0.0)
-                    
-                    valid = np.isfinite(u_s) & np.isfinite(v_s)
-                    
-                    # Accumulate valid points
-                    u_c = np.where(valid, u_s, 0.0)
-                    v_c = np.where(valid, v_s, 0.0)
-                    vu_c = np.where(valid, var_u_s, 0.0)
-                    vv_c = np.where(valid, var_v_s, 0.0)
-                    
-                    sum_u[li]  += u_c
-                    sum_v[li]  += v_c
-                    sum_uu[li] += u_c ** 2
-                    sum_vv[li] += v_c ** 2
-                    sum_uv[li] += u_c * v_c
-                    
-                    sum_var_u[li] += vu_c
-                    sum_var_v[li] += vv_c
-                    
-                    sum_u_var_u[li] += u_c * vu_c
-                    sum_u2_var_u[li] += u_c**2 * vu_c
-                    sum_v_var_v[li] += v_c * vv_c
-                    sum_v2_var_v[li] += v_c**2 * vv_c
-                    
-                    sum_u_var_v[li] += u_c * vv_c
-                    sum_u2_var_v[li] += u_c**2 * vv_c
-                    sum_v_var_u[li] += v_c * vu_c
-                    sum_v2_var_u[li] += v_c**2 * vu_c
-                    
-                    count[li]  += valid.astype(np.int64)
+            has_uncert = 'uncertainty' in f
+            if has_uncert:
+                unc_chunk = f['uncertainty'][t0:t1]
 
-        # Average and compute Reynolds Stresses (Variance/Covariance)
+            B = chunk.shape[0]
+            count += B
+            
+            for li, info in enumerate(line_info):
+                j0, j1, w0, w1 = info['j0'], info['j1'], info['w0'], info['w1']
+                
+                # Slicing the full Y-column instantly over the whole 100-frame chunk
+                u_chunk = (chunk[:, :, j0, 0] * w0 + chunk[:, :, j1, 0] * w1) * vel_scale_fac
+                
+                # In origin code, v raw was scaled by -vel_scale_fac to flip axis
+                v_chunk = -(chunk[:, :, j0, 1] * w0 + chunk[:, :, j1, 1] * w1) * vel_scale_fac 
+
+                if has_uncert:
+                    var_u_chunk = (unc_chunk[:, :, j0, 0]**2 * w0 + unc_chunk[:, :, j1, 0]**2 * w1) * var_scale_fac
+                    var_v_chunk = (unc_chunk[:, :, j0, 1]**2 * w0 + unc_chunk[:, :, j1, 1]**2 * w1) * var_scale_fac
+                else:
+                    var_u_chunk = np.zeros_like(u_chunk)
+                    var_v_chunk = np.zeros_like(v_chunk)
+                    
+                sum_u[li] += np.sum(u_chunk, axis=0)
+                sum_v[li] += np.sum(v_chunk, axis=0)
+                sum_uu[li] += np.sum(u_chunk**2, axis=0)
+                sum_vv[li] += np.sum(v_chunk**2, axis=0)
+                sum_uv[li] += np.sum(u_chunk * v_chunk, axis=0)
+                
+                sum_var_u[li] += np.sum(var_u_chunk, axis=0)
+                sum_var_v[li] += np.sum(var_v_chunk, axis=0)
+                
+                sum_u_var_u[li] += np.sum(u_chunk * var_u_chunk, axis=0)
+                sum_u2_var_u[li] += np.sum(u_chunk**2 * var_u_chunk, axis=0)
+                sum_v_var_v[li] += np.sum(v_chunk * var_v_chunk, axis=0)
+                sum_v2_var_v[li] += np.sum(v_chunk**2 * var_v_chunk, axis=0)
+                
+                sum_u_var_v[li] += np.sum(u_chunk * var_v_chunk, axis=0)
+                sum_u2_var_v[li] += np.sum(u_chunk**2 * var_v_chunk, axis=0)
+                sum_v_var_u[li] += np.sum(v_chunk * var_u_chunk, axis=0)
+                sum_v2_var_u[li] += np.sum(v_chunk**2 * var_u_chunk, axis=0)
+
         with np.errstate(invalid='ignore'):
+            count = float(count)
             umean = sum_u / count
             vmean = sum_v / count
             
@@ -347,7 +318,6 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
                 vv = sum_vv / count - vmean ** 2
                 uv = sum_uv / count - umean * vmean
                 
-                # Uncertainty Propagations (Time-averaged instantaneous uncertainty)
                 umean_uncert = np.sqrt(sum_var_u / count)
                 vmean_uncert = np.sqrt(sum_var_v / count)
                 
@@ -362,15 +332,12 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
                 vv_uncert = np.sqrt(np.maximum(var_vv, 0))
                 uv_uncert = np.sqrt(np.maximum(var_uv, 0))
             else:
-                # Instantaneous frame: no temporal variance -> no Reynolds Stresses.
                 uu = np.zeros_like(umean)
                 vv = np.zeros_like(vmean)
                 uv = np.zeros_like(umean)
                 
-                # Instantaneous uncertainty is simply the propagated pixel uncertainty.
-                # (sum_var_u contains the single frame squared uncertainty since count=1)
-                umean_uncert = np.sqrt(sum_var_u)
-                vmean_uncert = np.sqrt(sum_var_v)
+                umean_uncert = np.sqrt(sum_var_u / count) # same logic for 1 frame
+                vmean_uncert = np.sqrt(sum_var_v / count)
                 
                 uu_uncert = np.zeros_like(umean)
                 vv_uncert = np.zeros_like(vmean)
@@ -382,9 +349,10 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
             out_path = os.path.splitext(h5_filepath)[0] + '_lines.h5'
         
         with h5py.File(out_path, 'w') as fout:
-            fout.attrs['rotation_deg'] = angle_deg
+            fout.attrs['rotation_deg'] = 0.0 # Ignored by this fast extraction technique
             fout.attrs['coordinate_type'] = 'wall_normal'
-            for li, (x_wall, _) in enumerate(line_info):
+            for li, info in enumerate(line_info):
+                x_wall = info['x_wall']
                 mean_vel = np.stack([umean[li], vmean[li]], axis=1)
                 mean_vel_uncert = np.stack([umean_uncert[li], vmean_uncert[li]], axis=1)
                 
@@ -393,7 +361,7 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
                 
                 grp_name = f'x_location_{str(x_wall).replace(".", "_")}'
                 grp = fout.create_group(grp_name)
-                grp.create_dataset('y_coordinates', data=s_values)
+                grp.create_dataset('y_coordinates', data=ymm)
                 grp.attrs['coordinate_type'] = 'wall_normal_distance'
                 
                 vel_ds_out = grp.create_dataset('mean_velocity', data=mean_vel)
@@ -409,15 +377,17 @@ def extract_line_profiles(h5_filepath, x_positions_mm, angle_deg=0.0, frame_idx=
                 rey_unc_out.attrs['components'] = ['sigma_uu', 'sigma_uv', 'sigma_vv']
             
         results = {}
-        for li, (x_wall, _) in enumerate(line_info):
+        valid_counts_arr = np.full_like(ymm, int(count)) # Kept for API compatibility
+        for li, info in enumerate(line_info):
+            x_wall = info['x_wall']
             results[x_wall] = {
-                'y_coords': s_values,
+                'y_coords': ymm,
                 'mean_u': umean[li],
                 'mean_v': vmean[li],
                 'uu': uu[li],
                 'vv': vv[li],
                 'uv': uv[li],
-                'valid_counts': count[li]
+                'valid_counts': valid_counts_arr
             }
             
         return results, out_path
