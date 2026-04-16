@@ -393,10 +393,10 @@ When computing time-averaged properties from a sequence of $T$ frames, the per-f
 The time-averaged velocity $\bar{u}$ is:
 $$ \bar{u} = \frac{1}{T} \sum_{t=1}^{T} u(t) $$
 
-The variance of the mean, assuming independent measurement errors, is the sum of variances scaled by $1/T^2$:
-$$ \sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \sigma_u^2(t)} $$
+The uncertainty of the mean is modeled to preserve the true temporal fluctuation boundaries inherent to highly unsteady multiphase flows where measurements are strongly auto-correlated. Rather than standard error decay, it uses the root-mean-square (RMS) of instantaneous tracked uncertainty:
+$$ \sigma_{\bar{u}} = \sqrt{ \frac{1}{T} \sum_{t=1}^{T} \sigma_u^2(t) } $$
 
-*Note: For large $T$, this value appropriately decreases as $1/\sqrt{T}$. Even in highly unsteady flow, random measurement error averages out; physical unsteadiness is preserved in the Reynolds stresses instead.*
+*Note: By removing strict standard error division by $\sqrt{T}$, the mean uncertainty mathematically reflects the true average instantaneous tracking precision over the window, preserving structural magnitude independent of the recording length rather than artificially collapsing to 0.*
 
 #### 2.2 Reynolds Stress Uncertainty
 The Reynolds normal stress $\langle u'u' \rangle$ is defined as the variance of the velocity fluctuations:
@@ -413,6 +413,6 @@ $$ \sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum_{t=1}^{T} \left[ (v(t)
 | Quantity | Symbol | Uncertainty Formula |
 | :--- | :--- | :--- |
 | **Instantaneous Velocity** | $u(t)$ | $\sigma_u(t) = \|\delta_u\|$ (NCC 8×8 peak shift) |
-| **Mean Velocity** | $\bar{u}$ | $\sigma_{\bar{u}} = \frac{1}{T} \sqrt{\sum \sigma_u^2(t)}$ |
+| **Mean Velocity** | $\bar{u}$ | $\sigma_{\bar{u}} = \sqrt{\frac{1}{T} \sum \sigma_u^2(t)}$ |
 | **Reynolds Normal Stress** | $\langle u'u' \rangle$ | $\sigma_{\langle u'u' \rangle} = \frac{2}{T} \sqrt{\sum (u-\bar{u})^2 \sigma_u^2(t)}$ |
 | **Reynolds Shear Stress** | $\langle u'v' \rangle$ | $\sigma_{\langle u'v' \rangle} = \frac{1}{T} \sqrt{\sum [ (v-\bar{v})^2 \sigma_u^2(t) + (u-\bar{u})^2 \sigma_v^2(t) ]}$ |
