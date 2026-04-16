@@ -35,6 +35,8 @@ def create_quiver_video(video_path, h5_filepath, output_path, scale=2.0, skip=16
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0 or fps > 65535:
+        fps = 30  # Clamp high-speed camera timebase for MPEG4 compatibility
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
@@ -150,6 +152,8 @@ def create_contour_video(video_path, h5_filepath, dataset_name, output_path, alp
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0 or fps > 65535:
+        fps = 30  # Clamp high-speed camera timebase for MPEG4 compatibility
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
